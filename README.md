@@ -19,7 +19,7 @@ Template repo for integration in Gundi v2.
 - Optionally, use  `@crontab_schedule()` or `register.py --schedule` to make an action to run on a custom schedule
 
 
-## Action Examples: 
+## Action Examples:
 
 ```python
 # actions/configurations.py
@@ -44,9 +44,9 @@ from .configurations import PullObservationsConfiguration
 @crontab_schedule("0 */4 * * *")  # Run every 4 hours
 @activity_logger()
 async def action_pull_observations(integration, action_config: PullObservationsConfiguration):
-    
+
     # Add your business logic to extract data here...
-    
+
     # Optionally, log a custom messages to be shown in the portal
     await log_activity(
         integration_id=integration.id,
@@ -56,7 +56,7 @@ async def action_pull_observations(integration, action_config: PullObservationsC
         data={"start_date": "2024-01-01", "end_date": "2024-01-31"},
         config_data=action_config.dict()
     )
-    
+
     # Normalize the extracted data into a list of observations following to the Gundi schema:
     observations = [
         {
@@ -73,7 +73,7 @@ async def action_pull_observations(integration, action_config: PullObservationsC
             }
         }
     ]
-    
+
     # Send the extracted data to Gundi
     await send_observations_to_gundi(observations=observations, integration_id=integration.id)
 
@@ -119,9 +119,9 @@ from .configurations import MyWebhookPayload, MyWebhookConfig
 @webhook_activity_logger()
 async def webhook_handler(payload: MyWebhookPayload, integration=None, webhook_config: MyWebhookConfig = None):
     # Implement your custom logic to process the payload here...
-    
+
     # If the request is related to an integration, you can use the integration object to access the integration's data
-    
+
     # Normalize the extracted data into a list of observations following to the Gundi schema:
     transformed_data = [
         {
@@ -141,7 +141,7 @@ async def webhook_handler(payload: MyWebhookPayload, integration=None, webhook_c
           observations=transformed_data,
           integration_id=integration.id
       )
-    
+
     return {"observations_extracted": 1}
 ```
 
@@ -266,7 +266,7 @@ class MyWebhookPayload(HexStringPayload, WebhookPayload):
     type: str
     data: StructHexString
 
-    
+
 class MyWebhookConfig(HexStringConfig, WebhookConfiguration):
     custom_setting: str
     another_custom_setting: bool
@@ -408,7 +408,7 @@ Sample configuration in Gundi:
 Notice: This can also be combined with Dynamic Schema and JSON Transformations. In that case the hex string will be parsed first, adn then the JQ filter can be applied to the extracted data.
 
 ### Custom UI for configurations (ui schema)
-It's possible to customize how the forms for configurations are displayed in the Gundi portal. 
+It's possible to customize how the forms for configurations are displayed in the Gundi portal.
 To do that, use `FieldWithUIOptions` in your models. The `UIOptions` and `GlobalUISchemaOptions` will allow you to customize the appearance of the fields in the portal by setting any of the ["ui schema"](https://rjsf-team.github.io/react-jsonschema-form/docs/api-reference/uiSchema) supported options.
 
 ```python
@@ -459,4 +459,19 @@ class MyPullActionConfiguration(PullActionConfiguration):
             "force_fetch",
         ],
     )
+```
+
+## Development
+
+### Create Python Environment
+
+```bash
+uv venv --python=3.10 .venv
+source .venv/bin/activate
+uv pip install -r requirements.txt
+```
+
+### rebuild requirements
+```
+pip-compile --output-file=requirements.txt requirements-base.in requirements-dev.in requirements.in
 ```
