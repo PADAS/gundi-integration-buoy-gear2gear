@@ -503,9 +503,10 @@ class Gear2GearProcessor:
                     f"Failed to create haul payload for {source_gear.display_id}: {e}"
                 )
 
-        logger.info(
-            f"Generated {len(gear_payloads)} gear payload(s):\n"
-            f"{json.dumps(gear_payloads, indent=2, default=str)}"
+        logger.info(f"Generated {len(gear_payloads)} gear payload(s)")
+        logger.debug(
+            "Full gear payloads: %s",
+            json.dumps(gear_payloads, indent=2, default=str),
         )
 
         return gear_payloads

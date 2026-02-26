@@ -43,7 +43,7 @@ async def action_auth(
             er_token=action_config.source_token.get_secret_value(),
             er_site=str(action_config.source_url),
         )
-        source_gears = await source_client.get_gears(params={"page_size": 1})
+        await source_client.get_gears(params={"page_size": 1})
         results["source_valid"] = True
         logger.info(f"Source ER connection successful")
     except Exception as e:
@@ -56,7 +56,7 @@ async def action_auth(
             er_token=action_config.destination_token.get_secret_value(),
             er_site=str(action_config.destination_url),
         )
-        dest_gears = await dest_client.get_gears(params={"page_size": 1})
+        await dest_client.get_gears(params={"page_size": 1})
         results["destination_valid"] = True
         logger.info(f"Destination ER connection successful")
     except Exception as e:
@@ -71,7 +71,9 @@ async def action_auth(
 
 
 @activity_logger()
-@crontab_schedule("*/5 * * * *")  # Run every 5 minutes
+@crontab_schedule(
+    "*/5 * * * *"
+)  # Fixed every 5 min; sync_interval_minutes in config is for display/future use
 async def action_pull_gear(
     integration: Integration, action_config: Gear2GearPullConfiguration
 ) -> Dict:

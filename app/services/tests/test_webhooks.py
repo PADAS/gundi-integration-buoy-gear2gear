@@ -132,15 +132,12 @@ async def test_get_integration_with_integration_id_header(
         return_value=integration_v2_with_webhook
     )
 
-    from fastapi import Request
-
     from app.services.webhooks import get_integration
 
-    # Create a mock request with x-gundi-integration-id header
-    headers = {"x-gundi-integration-id": str(integration_v2_with_webhook.id)}
-    request = Request({"type": "http", "method": "POST", "url": "http://test/webhooks"})
-    request._headers = headers
-    request._query_params = {}
+    # Use Mock so we don't rely on Request private attributes (_headers, _query_params)
+    request = mocker.Mock()
+    request.headers = {"x-gundi-integration-id": str(integration_v2_with_webhook.id)}
+    request.query_params = {}
 
     integration = await get_integration(request)
 
@@ -158,14 +155,12 @@ async def test_get_integration_with_query_param(mocker, integration_v2_with_webh
         return_value=integration_v2_with_webhook
     )
 
-    from fastapi import Request
-
     from app.services.webhooks import get_integration
 
-    # Create a mock request with integration_id query param
-    request = Request({"type": "http", "method": "POST", "url": "http://test/webhooks"})
-    request._headers = {}
-    request._query_params = {"integration_id": str(integration_v2_with_webhook.id)}
+    # Use Mock so we don't rely on Request private attributes
+    request = mocker.Mock()
+    request.headers = {}
+    request.query_params = {"integration_id": str(integration_v2_with_webhook.id)}
 
     integration = await get_integration(request)
 
@@ -188,14 +183,12 @@ async def test_get_integration_handles_config_manager_exception(
     # Mock the publish_event function
     mocker.patch("app.services.webhooks.publish_event", mock_publish_event)
 
-    from fastapi import Request
-
     from app.services.webhooks import get_integration
 
-    # Create a mock request with integration ID
-    request = Request({"type": "http", "method": "POST", "url": "http://test/webhooks"})
-    request._headers = {"x-gundi-integration-id": "test-integration-id"}
-    request._query_params = {}
+    # Use Mock so we don't rely on Request private attributes
+    request = mocker.Mock()
+    request.headers = {"x-gundi-integration-id": "test-integration-id"}
+    request.query_params = {}
 
     integration = await get_integration(request)
 
@@ -252,14 +245,12 @@ async def test_process_webhook_handles_no_integration_gracefully(
     # Mock the logger to capture warning messages
     mock_logger = mocker.patch("app.services.webhooks.logger")
 
-    from fastapi import Request
-
     from app.services.webhooks import process_webhook
 
-    # Create a mock request
-    request = Request({"type": "http", "method": "POST", "url": "http://test/webhooks"})
-    request._headers = {}
-    request._query_params = {}
+    # Use Mock so we don't rely on Request private attributes
+    request = mocker.Mock()
+    request.headers = {}
+    request.query_params = {}
     mocker.patch.object(
         request,
         "json",
@@ -395,15 +386,12 @@ async def test_get_integration_reloads_from_gundi_on_cache_miss(
     # Patch the config_manager instance in the webhooks module
     mocker.patch("app.services.webhooks.config_manager", config_manager)
 
-    from fastapi import Request
-
     from app.services.webhooks import get_integration
 
-    # Create a mock request with integration ID
-    headers = {"x-gundi-integration-id": str(integration_v2_with_webhook.id)}
-    request = Request({"type": "http", "method": "POST", "url": "http://test/webhooks"})
-    request._headers = headers
-    request._query_params = {}
+    # Use Mock so we don't rely on Request private attributes
+    request = mocker.Mock()
+    request.headers = {"x-gundi-integration-id": str(integration_v2_with_webhook.id)}
+    request.query_params = {}
 
     integration = await get_integration(request)
 
@@ -453,15 +441,12 @@ async def test_process_webhook_handles_gundi_api_failure_gracefully(
     # Mock publish_event to capture the error event
     mocker.patch("app.services.webhooks.publish_event", mock_publish_event)
 
-    from fastapi import Request
-
     from app.services.webhooks import get_integration
 
-    # Create a mock request with integration ID
-    headers = {"x-gundi-integration-id": "test-integration-id"}
-    request = Request({"type": "http", "method": "POST", "url": "http://test/webhooks"})
-    request._headers = headers
-    request._query_params = {}
+    # Use Mock so we don't rely on Request private attributes
+    request = mocker.Mock()
+    request.headers = {"x-gundi-integration-id": "test-integration-id"}
+    request.query_params = {}
 
     integration = await get_integration(request)
 

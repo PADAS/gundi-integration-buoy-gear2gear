@@ -55,7 +55,7 @@ class Gear2GearPullConfiguration(PullActionConfiguration):
     sync_interval_minutes: int = pydantic.Field(
         default=5,
         title="Sync Interval (minutes)",
-        description="How often to sync gear data between instances.",
+        description="Desired sync frequency. Currently the action runs on a fixed 5-minute schedule; this value is for display and future configurable scheduling.",
         ge=1,
         le=60,
     )

@@ -153,24 +153,27 @@ class BuoyClient:
                     url, headers=self.headers, params=params
                 ) as response:
                     if response.status != 200:
-                        logger.error(
+                        body = await response.text()
+                        raise RuntimeError(
                             f"Failed to fetch sources. "
-                            f"Status code: {response.status} "
-                            f"Body: {await response.text()}"
+                            f"Status code: {response.status} Body: {body}"
                         )
-                        break
 
                     data = await response.json()
 
                     if "data" not in data:
-                        logger.error("Unexpected response structure")
-                        break
+                        raise RuntimeError(
+                            f"Unexpected response structure from sources API: "
+                            f"missing 'data' field. Response: {data}"
+                        )
 
                     page_data = data["data"]
 
                     if "results" not in page_data:
-                        logger.error("No results field in response")
-                        break
+                        raise RuntimeError(
+                            f"Unexpected response structure from sources API: "
+                            f"missing 'results' field. Response: {page_data}"
+                        )
 
                     results = page_data["results"]
                     sources.extend(results)

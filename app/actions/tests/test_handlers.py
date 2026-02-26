@@ -349,7 +349,7 @@ class TestActionPullGearWithPolygonFiltering:
             mock_processor.process.return_value = []
             mock_processor_class.return_value = mock_processor
 
-            result = await action_pull_gear(
+            await action_pull_gear(
                 integration=integration_v2_gear2gear,
                 action_config=pull_config,
             )
@@ -387,7 +387,7 @@ class TestActionPullGearWithPolygonFiltering:
             mock_processor.process.return_value = []
             mock_processor_class.return_value = mock_processor
 
-            result = await action_pull_gear(
+            await action_pull_gear(
                 integration=integration_v2_gear2gear,
                 action_config=gear2gear_pull_config,
             )
