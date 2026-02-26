@@ -1,5 +1,5 @@
-# gundi-integration-action-runner
-Template repo for integration in Gundi v2.
+# gundi-integration-buoy-gear2gear
+Action Runner for sharing Buoy Gear data between two EarthRanger sites.
 
 ## Usage
 - Fork this repo
