@@ -199,7 +199,7 @@ class BuoyClient:
             FeatureGroupNotFoundError: If the feature group doesn't exist.
             RuntimeError: For other API errors.
         """
-        url = f"{self.er_site}/api/v1.0/featuregroups/{feature_group_id}/"
+        url = f"{self.er_site}/api/v1.0/spatialfeaturegroup/{feature_group_id}/"
 
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=self.headers) as response:
