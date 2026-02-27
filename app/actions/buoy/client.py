@@ -89,6 +89,44 @@ class BuoyClient:
 
         return gears
 
+    async def get_gear(self, set_id: str) -> Optional[BuoyGear]:
+        """
+        Fetch a single gear by set ID from the Buoy Gear API.
+
+        Use this to check if a gearset already exists in the destination
+        before sending, or to compare source vs destination and decide
+        if an update payload is needed.
+
+        Args:
+            set_id: The gear set ID (UUID string).
+
+        Returns:
+            BuoyGear if found, None if the gear does not exist (404).
+        """
+        url = f"{self.er_site}/api/v1.0/gear/{set_id}/"
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=self.headers) as response:
+                if response.status == 404:
+                    logger.debug(f"Gear set_id={set_id} not found in API")
+                    return None
+                if response.status != 200:
+                    body = await response.text()
+                    raise RuntimeError(
+                        f"Failed to fetch gear set_id={set_id}. "
+                        f"Status code: {response.status} Body: {body}"
+                    )
+
+                data = await response.json()
+                if "data" in data:
+                    item = data["data"]
+                else:
+                    item = data
+
+                gear = BuoyGear.parse_obj(item)
+                gear.last_updated = gear.last_updated.astimezone(timezone.utc)
+                return gear
+
     async def send_gear(self, gear_payload: Dict[str, Any]) -> Dict[str, Any]:
         """
         Send gear payload to the Buoy API POST endpoint.

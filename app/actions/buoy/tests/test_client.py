@@ -168,6 +168,70 @@ class TestBuoyClientGetGears:
             assert gears[1].display_id == "GEAR-002"
 
 
+class TestBuoyClientGetGear:
+    """Tests for BuoyClient.get_gear method (single gear by set_id)."""
+
+    @pytest.mark.asyncio
+    async def test_get_gear_success(self, sample_gear_data):
+        """Test fetching a single gear by set_id."""
+        set_id = sample_gear_data["id"]
+        mock_response = MockResponse(200, json_data={"data": sample_gear_data})
+        mock_session = MockSession(responses=[mock_response])
+
+        with patch("aiohttp.ClientSession", return_value=mock_session):
+            client = BuoyClient(er_token="token", er_site="https://test.pamdas.org")
+            gear = await client.get_gear(set_id)
+
+            assert gear is not None
+            assert gear.display_id == sample_gear_data["display_id"]
+            assert str(gear.id) == set_id
+            assert gear.status == "deployed"
+            assert len(mock_session.get_calls) == 1
+            url = mock_session.get_calls[0][0]
+            assert f"/api/v1.0/gear/{set_id}/" in url
+
+    @pytest.mark.asyncio
+    async def test_get_gear_not_found(self):
+        """Test get_gear returns None when gear does not exist (404)."""
+        mock_response = MockResponse(404, text_data="Not found")
+        mock_session = MockSession(responses=[mock_response])
+
+        with patch("aiohttp.ClientSession", return_value=mock_session):
+            client = BuoyClient(er_token="token", er_site="https://test.pamdas.org")
+            gear = await client.get_gear("00000000-0000-0000-0000-000000000000")
+
+            assert gear is None
+
+    @pytest.mark.asyncio
+    async def test_get_gear_unwraps_data(self, sample_gear_data):
+        """Test that response without 'data' wrapper is still parsed."""
+        set_id = sample_gear_data["id"]
+        mock_response = MockResponse(200, json_data=sample_gear_data)
+        mock_session = MockSession(responses=[mock_response])
+
+        with patch("aiohttp.ClientSession", return_value=mock_session):
+            client = BuoyClient(er_token="token", er_site="https://test.pamdas.org")
+            gear = await client.get_gear(set_id)
+
+            assert gear is not None
+            assert str(gear.id) == set_id
+
+    @pytest.mark.asyncio
+    async def test_get_gear_api_error(self):
+        """Test get_gear raises on non-404 API error."""
+        mock_response = MockResponse(500, text_data="Internal Server Error")
+        mock_session = MockSession(responses=[mock_response])
+
+        with patch("aiohttp.ClientSession", return_value=mock_session):
+            client = BuoyClient(er_token="token", er_site="https://test.pamdas.org")
+
+            with pytest.raises(RuntimeError) as exc_info:
+                await client.get_gear("some-set-id")
+
+            assert "Failed to fetch gear" in str(exc_info.value)
+            assert "500" in str(exc_info.value)
+
+
 class TestBuoyClientSendGear:
     """Tests for BuoyClient.send_gear method."""
 

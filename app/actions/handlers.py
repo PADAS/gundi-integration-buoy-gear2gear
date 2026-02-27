@@ -141,6 +141,55 @@ async def action_pull_gear(
             logger.info(
                 f"Successfully sent gear {idx + 1}/{len(gear_payloads)} to destination"
             )
+        elif result.get("status_code") == 409:
+            # Gear already exists (e.g. duplicate observation); retry as update
+            set_id = payload.get("set_id")
+            if not set_id:
+                failure_count += 1
+                failed_payloads.append(
+                    {"index": idx, "error": "409 without set_id in payload"}
+                )
+                continue
+            try:
+                dest_gear = await destination_client.get_gear(set_id)
+                source_gear = await source_client.get_gear(set_id)
+                if dest_gear is None or source_gear is None:
+                    logger.warning(
+                        f"409 for gear {set_id}: could not fetch for retry "
+                        f"(dest={dest_gear is not None}, "
+                        f"source={source_gear is not None})"
+                    )
+                    failure_count += 1
+                    failed_payloads.append(
+                        {"index": idx, "error": result.get("response")}
+                    )
+                    continue
+                if not processor._needs_update(source_gear, dest_gear):
+                    success_count += 1
+                    logger.info(
+                        f"Gear {idx + 1}/{len(gear_payloads)} (set_id={set_id}) "
+                        "already existed and in sync; no update sent after 409"
+                    )
+                    continue
+                update_payload = processor._create_update_payload(
+                    source_gear, dest_gear
+                )
+                retry_result = await destination_client.send_gear(update_payload)
+                if retry_result.get("status") == "success":
+                    success_count += 1
+                    logger.info(
+                        f"Gear {idx + 1}/{len(gear_payloads)} (set_id={set_id}) "
+                        "already existed; sent as update after 409"
+                    )
+                else:
+                    failure_count += 1
+                    failed_payloads.append(
+                        {"index": idx, "error": retry_result.get("response")}
+                    )
+            except Exception as e:
+                logger.exception(f"Failed to retry gear {set_id} as update after 409")
+                failure_count += 1
+                failed_payloads.append({"index": idx, "error": str(e)})
         else:
             failure_count += 1
             error_info = result.get("error") or result.get("response", "Unknown error")
