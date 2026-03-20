@@ -21,6 +21,7 @@ class TestActionAuth:
         with patch("app.actions.handlers.BuoyClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_client.get_gears.return_value = []
+            mock_client.__aenter__.return_value = mock_client
             mock_client_class.return_value = mock_client
 
             result = await action_auth(
@@ -43,9 +44,11 @@ class TestActionAuth:
         with patch("app.actions.handlers.BuoyClient") as mock_client_class:
             mock_source = AsyncMock()
             mock_source.get_gears.side_effect = Exception("Source connection failed")
+            mock_source.__aenter__.return_value = mock_source
 
             mock_dest = AsyncMock()
             mock_dest.get_gears.return_value = []
+            mock_dest.__aenter__.return_value = mock_dest
 
             mock_client_class.side_effect = [mock_source, mock_dest]
 
@@ -67,9 +70,11 @@ class TestActionAuth:
         with patch("app.actions.handlers.BuoyClient") as mock_client_class:
             mock_source = AsyncMock()
             mock_source.get_gears.return_value = []
+            mock_source.__aenter__.return_value = mock_source
 
             mock_dest = AsyncMock()
             mock_dest.get_gears.side_effect = Exception("Destination connection failed")
+            mock_dest.__aenter__.return_value = mock_dest
 
             mock_client_class.side_effect = [mock_source, mock_dest]
 
@@ -91,6 +96,7 @@ class TestActionAuth:
         with patch("app.actions.handlers.BuoyClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_client.get_gears.side_effect = Exception("Connection failed")
+            mock_client.__aenter__.return_value = mock_client
             mock_client_class.return_value = mock_client
 
             result = await action_auth(

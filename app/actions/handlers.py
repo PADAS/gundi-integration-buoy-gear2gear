@@ -39,11 +39,11 @@ async def action_auth(
 
     # Test source connection
     try:
-        source_client = BuoyClient(
+        async with BuoyClient(
             er_token=action_config.source_token.get_secret_value(),
             er_site=str(action_config.source_url),
-        )
-        await source_client.get_gears(params={"page_size": 1})
+        ) as source_client:
+            await source_client.get_gears(params={"page_size": 1})
         results["source_valid"] = True
         logger.info(f"Source ER connection successful")
     except Exception as e:
@@ -52,11 +52,11 @@ async def action_auth(
 
     # Test destination connection
     try:
-        dest_client = BuoyClient(
+        async with BuoyClient(
             er_token=action_config.destination_token.get_secret_value(),
             er_site=str(action_config.destination_url),
-        )
-        await dest_client.get_gears(params={"page_size": 1})
+        ) as dest_client:
+            await dest_client.get_gears(params={"page_size": 1})
         results["destination_valid"] = True
         logger.info(f"Destination ER connection successful")
     except Exception as e:
@@ -106,7 +106,21 @@ async def action_pull_gear(
         er_token=auth_config.destination_token.get_secret_value(),
         er_site=str(auth_config.destination_url),
     )
+    try:
+        return await _pull_gear(
+            integration, action_config, source_client, destination_client
+        )
+    finally:
+        await source_client.close()
+        await destination_client.close()
 
+
+async def _pull_gear(
+    integration: Integration,
+    action_config: Gear2GearPullConfiguration,
+    source_client: BuoyClient,
+    destination_client: BuoyClient,
+) -> Dict:
     # Load polygon filters from feature groups if configured
     containing_shapes = []
     if action_config.feature_groups:

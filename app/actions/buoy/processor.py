@@ -211,7 +211,7 @@ class Gear2GearProcessor:
             devices.append(device_payload)
 
         payload = {
-            "set_id": str(source_gear.id),
+            "set_id": str(dest_gear.id),
             "manufacturer_name": source_gear.manufacturer,
             "deployment_type": source_gear.type,
             "devices": devices,

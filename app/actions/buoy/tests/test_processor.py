@@ -69,7 +69,8 @@ class TestGear2GearProcessorPayloadCreation:
             updated_gear_source, deployed_gear_source
         )
 
-        assert payload["set_id"] == str(updated_gear_source.id)
+        # set_id should come from the destination gear (the one being updated)
+        assert payload["set_id"] == str(deployed_gear_source.id)
         assert payload["manufacturer_name"] == updated_gear_source.manufacturer
 
         # Update payload should NOT have initial_deployment_date
