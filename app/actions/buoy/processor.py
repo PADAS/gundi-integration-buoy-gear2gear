@@ -70,7 +70,7 @@ class Gear2GearProcessor:
             point = Point(device.location.longitude, device.location.latitude)
 
             for polygon in self._containing_shapes:
-                if polygon.contains(point):
+                if polygon.covers(point):
                     logger.debug(
                         f"Device {device.mfr_device_id} at "
                         f"({device.location.latitude}, {device.location.longitude}) "
