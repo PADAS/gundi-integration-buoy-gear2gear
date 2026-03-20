@@ -82,11 +82,16 @@ class TestGear2GearProcessorPayloadCreation:
         assert device["location"]["latitude"] == 45.5
         assert device["location"]["longitude"] == -120.5
 
-    def test_create_haul_payload(self, processor, hauled_gear_source):
+    def test_create_haul_payload(
+        self, processor, hauled_gear_source, deployed_gear_source
+    ):
         """Test creating a haul payload."""
-        payload = processor._create_haul_payload(hauled_gear_source)
+        payload = processor._create_haul_payload(
+            hauled_gear_source, deployed_gear_source
+        )
 
-        assert payload["set_id"] == str(hauled_gear_source.id)
+        # set_id should come from the destination gear (the one being hauled)
+        assert payload["set_id"] == str(deployed_gear_source.id)
         assert payload["manufacturer_name"] == hauled_gear_source.manufacturer
 
         device = payload["devices"][0]
@@ -200,7 +205,7 @@ class TestGear2GearProcessorIdentifySyncActions:
         assert len(to_deploy) == 0
         assert len(to_update) == 0
         assert len(to_haul) == 1
-        assert to_haul[0] == source_gear
+        assert to_haul[0] == (source_gear, dest_gear)
 
     @pytest.mark.asyncio
     async def test_skip_hauled_gear_not_in_destination(
@@ -719,8 +724,9 @@ class TestGear2GearProcessorPolygonFiltering:
 
         payloads = await processor.process()
 
-        # Should create haul payload
+        # Should create haul payload targeting the destination gear's ID
         assert len(payloads) == 1
+        assert payloads[0]["set_id"] == str(dest_gear.id)
         assert payloads[0]["devices"][0]["device_status"] == "hauled"
 
     @pytest.mark.asyncio

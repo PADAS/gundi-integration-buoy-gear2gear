@@ -219,12 +219,15 @@ class Gear2GearProcessor:
 
         return payload
 
-    def _create_haul_payload(self, source_gear: BuoyGear) -> Dict[str, Any]:
+    def _create_haul_payload(
+        self, source_gear: BuoyGear, dest_gear: BuoyGear
+    ) -> Dict[str, Any]:
         """
         Create a haul payload from a source gear that is hauled.
 
         Args:
             source_gear: The hauled gear from the source ER instance.
+            dest_gear: The existing gear in the destination.
 
         Returns:
             Dict in the format expected by /api/v1.0/gear/ POST endpoint.
@@ -255,7 +258,7 @@ class Gear2GearProcessor:
             devices.append(haul_device)
 
         payload = {
-            "set_id": str(source_gear.id),
+            "set_id": str(dest_gear.id),
             "manufacturer_name": source_gear.manufacturer,
             "deployment_type": source_gear.type,
             "devices": devices,
@@ -277,8 +280,8 @@ class Gear2GearProcessor:
             An update payload dict if the gear needs updating, or None if
             the gear is already in sync or couldn't be fetched.
         """
-        dest_gear = await self.destination_client.get_gear(set_id)
-        source_gear = await self.source_client.get_gear(set_id)
+        dest_gear = await self._destination_client.get_gear(set_id)
+        source_gear = await self._source_client.get_gear(set_id)
 
         if dest_gear is None or source_gear is None:
             raise RuntimeError(
@@ -334,7 +337,9 @@ class Gear2GearProcessor:
         source_gears: List[BuoyGear],
         dest_gears: List[BuoyGear],
         all_source_gears: Optional[List[BuoyGear]] = None,
-    ) -> Tuple[List[BuoyGear], List[Tuple[BuoyGear, BuoyGear]], List[BuoyGear]]:
+    ) -> Tuple[
+        List[BuoyGear], List[Tuple[BuoyGear, BuoyGear]], List[Tuple[BuoyGear, BuoyGear]]
+    ]:
         """
         Identify which gears need to be deployed, updated, or hauled.
 
@@ -348,11 +353,11 @@ class Gear2GearProcessor:
             Tuple of (to_deploy, to_update, to_haul) where:
                 - to_deploy: Source gears not in destination
                 - to_update: Tuples of (source_gear, dest_gear) needing update
-                - to_haul: Source gears that are hauled or moved outside polygon
+                - to_haul: Tuples of (source_gear, dest_gear) that are hauled or moved outside polygon
         """
         to_deploy: List[BuoyGear] = []
         to_update: List[Tuple[BuoyGear, BuoyGear]] = []
-        to_haul: List[BuoyGear] = []
+        to_haul: List[Tuple[BuoyGear, BuoyGear]] = []
 
         # Build lookup by gear ID
         dest_gear_by_id: Dict[str, BuoyGear] = {
@@ -401,7 +406,7 @@ class Gear2GearProcessor:
                 # Gear exists in destination
                 if source_gear.status == "hauled" and dest_gear.status == "deployed":
                     # Source is hauled but destination still shows deployed
-                    to_haul.append(source_gear)
+                    to_haul.append((source_gear, dest_gear))
                     logger.info(
                         f"Gear {source_gear.display_id} marked for haul "
                         f"(hauled in source, deployed in destination)"
@@ -449,7 +454,7 @@ class Gear2GearProcessor:
                 if matching_source is not None:
                     # This gear exists in source but wasn't in filtered list
                     # It means the gear moved outside the polygon - haul it
-                    to_haul.append(matching_source)
+                    to_haul.append((matching_source, dest_gear))
                     logger.info(
                         f"Gear {matching_source.display_id} marked for haul "
                         f"(moved outside polygon filter)"
@@ -525,9 +530,9 @@ class Gear2GearProcessor:
                 )
 
         # Process hauls
-        for source_gear in to_haul:
+        for source_gear, dest_gear in to_haul:
             try:
-                payload = self._create_haul_payload(source_gear)
+                payload = self._create_haul_payload(source_gear, dest_gear)
                 gear_payloads.append(payload)
                 logger.info(f"Created haul payload for {source_gear.display_id}")
             except Exception as e:
