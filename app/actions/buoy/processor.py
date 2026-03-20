@@ -165,7 +165,7 @@ class Gear2GearProcessor:
             "devices": devices,
         }
 
-        if initial_deployment and source_gear.status == "deployed":
+        if initial_deployment:
             payload["initial_deployment_date"] = self._remove_milliseconds(
                 initial_deployment
             ).isoformat()
