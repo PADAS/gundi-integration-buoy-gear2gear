@@ -165,29 +165,14 @@ async def _pull_gear(
                 )
                 continue
             try:
-                dest_gear = await destination_client.get_gear(set_id)
-                source_gear = await source_client.get_gear(set_id)
-                if dest_gear is None or source_gear is None:
-                    logger.warning(
-                        f"409 for gear {set_id}: could not fetch for retry "
-                        f"(dest={dest_gear is not None}, "
-                        f"source={source_gear is not None})"
-                    )
-                    failure_count += 1
-                    failed_payloads.append(
-                        {"index": idx, "error": result.get("response")}
-                    )
-                    continue
-                if not processor._needs_update(source_gear, dest_gear):
+                update_payload = await processor.resolve_conflict(set_id)
+                if update_payload is None:
                     success_count += 1
                     logger.info(
                         f"Gear {idx + 1}/{len(gear_payloads)} (set_id={set_id}) "
-                        "already existed and in sync; no update sent after 409"
+                        "already exists and is in sync after 409"
                     )
                     continue
-                update_payload = processor._create_update_payload(
-                    source_gear, dest_gear
-                )
                 retry_result = await destination_client.send_gear(update_payload)
                 if retry_result.get("status") == "success":
                     success_count += 1
@@ -209,8 +194,11 @@ async def _pull_gear(
             error_info = result.get("error") or result.get("response", "Unknown error")
             logger.error(
                 f"Failed to send gear {idx + 1}/{len(gear_payloads)} "
-                f'with payload "{json.dumps(payload, default=str)}" '
+                f"(set_id={payload.get('set_id')}) "
                 f"to destination: {error_info}"
+            )
+            logger.debug(
+                f"Full payload for failed gear: {json.dumps(payload, default=str)}"
             )
             failed_payloads.append({"index": idx, "error": error_info})
 

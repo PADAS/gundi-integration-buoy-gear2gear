@@ -65,7 +65,7 @@ class TestGear2GearProcessorPayloadCreation:
         self, processor, updated_gear_source, deployed_gear_source
     ):
         """Test creating an update payload."""
-        payload = processor._create_update_payload(
+        payload = processor.create_update_payload(
             updated_gear_source, deployed_gear_source
         )
 
@@ -109,7 +109,7 @@ class TestGear2GearProcessorNeedsUpdate:
         source_gear = deployed_gear_source.copy(deep=True)
         source_gear.status = "hauled"
 
-        assert processor._needs_update(source_gear, dest_gear) is True
+        assert processor.needs_update(source_gear, dest_gear) is True
 
     def test_needs_update_newer_timestamp(self, processor, deployed_gear_source):
         """Test that newer timestamp triggers update."""
@@ -117,7 +117,7 @@ class TestGear2GearProcessorNeedsUpdate:
         source_gear = deployed_gear_source.copy(deep=True)
         source_gear.last_updated = datetime(2024, 2, 1, 10, 0, 0, tzinfo=timezone.utc)
 
-        assert processor._needs_update(source_gear, dest_gear) is True
+        assert processor.needs_update(source_gear, dest_gear) is True
 
     def test_needs_update_location_changed(self, processor, deployed_gear_source):
         """Test that location change triggers update."""
@@ -127,14 +127,14 @@ class TestGear2GearProcessorNeedsUpdate:
             latitude=46.0, longitude=-121.0
         )
 
-        assert processor._needs_update(source_gear, dest_gear) is True
+        assert processor.needs_update(source_gear, dest_gear) is True
 
     def test_needs_update_no_change(self, processor, deployed_gear_source):
         """Test that no change doesn't trigger update."""
         dest_gear = deployed_gear_source.copy(deep=True)
         source_gear = deployed_gear_source.copy(deep=True)
 
-        assert processor._needs_update(source_gear, dest_gear) is False
+        assert processor.needs_update(source_gear, dest_gear) is False
 
 
 class TestGear2GearProcessorIdentifySyncActions:

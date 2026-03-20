@@ -172,7 +172,7 @@ class Gear2GearProcessor:
 
         return payload
 
-    def _create_update_payload(
+    def create_update_payload(
         self, source_gear: BuoyGear, dest_gear: BuoyGear
     ) -> Dict[str, Any]:
         """
@@ -263,7 +263,39 @@ class Gear2GearProcessor:
 
         return payload
 
-    def _needs_update(self, source_gear: BuoyGear, dest_gear: BuoyGear) -> bool:
+    async def resolve_conflict(self, set_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Resolve a 409 conflict for a gear that already exists in the destination.
+
+        Fetches the gear from both source and destination, compares them, and
+        returns an update payload if needed.
+
+        Args:
+            set_id: The gear set ID from the original deploy payload.
+
+        Returns:
+            An update payload dict if the gear needs updating, or None if
+            the gear is already in sync or couldn't be fetched.
+        """
+        dest_gear = await self.destination_client.get_gear(set_id)
+        source_gear = await self.source_client.get_gear(set_id)
+
+        if dest_gear is None or source_gear is None:
+            raise RuntimeError(
+                f"409 for gear {set_id}: could not fetch for conflict resolution "
+                f"(dest={dest_gear is not None}, source={source_gear is not None})"
+            )
+
+        if not self.needs_update(source_gear, dest_gear):
+            logger.info(
+                f"Gear set_id={set_id} already exists and is in sync; "
+                "no update needed after 409"
+            )
+            return None
+
+        return self.create_update_payload(source_gear, dest_gear)
+
+    def needs_update(self, source_gear: BuoyGear, dest_gear: BuoyGear) -> bool:
         """
         Determine if a destination gear needs to be updated based on source gear.
 
@@ -374,7 +406,7 @@ class Gear2GearProcessor:
                         f"Gear {source_gear.display_id} marked for haul "
                         f"(hauled in source, deployed in destination)"
                     )
-                elif self._needs_update(source_gear, dest_gear):
+                elif self.needs_update(source_gear, dest_gear):
                     to_update.append((source_gear, dest_gear))
                     logger.info(
                         f"Gear {source_gear.display_id} marked for update "
@@ -484,7 +516,7 @@ class Gear2GearProcessor:
         # Process updates
         for source_gear, dest_gear in to_update:
             try:
-                payload = self._create_update_payload(source_gear, dest_gear)
+                payload = self.create_update_payload(source_gear, dest_gear)
                 gear_payloads.append(payload)
                 logger.info(f"Created update payload for {source_gear.display_id}")
             except Exception as e:
