@@ -2,24 +2,34 @@ import base64
 import json
 
 import pytest
-from fastapi.testclient import TestClient
 from fastapi import status
+from fastapi.testclient import TestClient
 from gundi_core.commands import RunIntegrationAction
 from gundi_core.events import IntegrationActionFailed
 from gundi_core.events.transformers import ObservationTransformedER
 
 from app import settings
-from app.conftest import MockSubActionConfiguration, MockPushActionConfiguration
+from app.conftest import MockPushActionConfiguration, MockSubActionConfiguration
 from app.main import app
 from app.services.action_scheduler import trigger_action
 
-api_client = TestClient(app)
+
+@pytest.fixture
+def api_client():
+    with TestClient(app) as client:
+        yield client
 
 
 @pytest.mark.asyncio
 async def test_execute_pull_action_from_pubsub(
-        mocker, mock_gundi_client_v2, mock_publish_event, mock_action_handlers, mock_config_manager,
-        pubsub_message_request_headers, run_pull_action_pubsub_payload
+    mocker,
+    mock_gundi_client_v2,
+    mock_publish_event,
+    mock_action_handlers,
+    mock_config_manager,
+    pubsub_message_request_headers,
+    run_pull_action_pubsub_payload,
+    api_client,
 ):
     mocker.patch("app.services.action_runner.action_handlers", mock_action_handlers)
     mocker.patch("app.services.action_runner._portal", mock_gundi_client_v2)
@@ -47,8 +57,15 @@ async def test_execute_pull_action_from_pubsub(
 
 @pytest.mark.asyncio
 async def test_execute_push_action_from_pubsub(
-        mocker, mock_gundi_client_v2, mock_publish_event, mock_action_handlers, mock_config_manager,
-        pubsub_message_request_headers, run_push_action_pubsub_payload, mock_push_observations_handler
+    mocker,
+    mock_gundi_client_v2,
+    mock_publish_event,
+    mock_action_handlers,
+    mock_config_manager,
+    pubsub_message_request_headers,
+    run_push_action_pubsub_payload,
+    mock_push_observations_handler,
+    api_client,
 ):
     mocker.patch("app.services.action_runner.action_handlers", mock_action_handlers)
     mocker.patch("app.actions.action_handlers", mock_action_handlers)
@@ -88,8 +105,13 @@ async def test_execute_push_action_from_pubsub(
 
 @pytest.mark.asyncio
 async def test_execute_action_from_api(
-        mocker, mock_gundi_client_v2, integration_v2, mock_config_manager,
-        mock_publish_event, mock_action_handlers,
+    mocker,
+    mock_gundi_client_v2,
+    integration_v2,
+    mock_config_manager,
+    mock_publish_event,
+    mock_action_handlers,
+    api_client,
 ):
     mocker.patch("app.services.action_runner.action_handlers", mock_action_handlers)
     mocker.patch("app.services.action_runner._portal", mock_gundi_client_v2)
@@ -101,10 +123,7 @@ async def test_execute_action_from_api(
 
     response = api_client.post(
         "/v1/actions/execute/",
-        json={
-            "integration_id": integration_id,
-            "action_id": action_id
-        }
+        json={"integration_id": integration_id, "action_id": action_id},
     )
 
     assert response.status_code == 200
@@ -117,8 +136,13 @@ async def test_execute_action_from_api(
 
 @pytest.mark.asyncio
 async def test_execute_action_from_api_with_config_overrides(
-        mocker, mock_gundi_client_v2, integration_v2, mock_config_manager,
-        mock_publish_event, mock_action_handlers,
+    mocker,
+    mock_gundi_client_v2,
+    integration_v2,
+    mock_config_manager,
+    mock_publish_event,
+    mock_action_handlers,
+    api_client,
 ):
     mocker.patch("app.services.action_runner.action_handlers", mock_action_handlers)
     mocker.patch("app.services.action_runner._portal", mock_gundi_client_v2)
@@ -132,14 +156,16 @@ async def test_execute_action_from_api_with_config_overrides(
         json={
             "integration_id": str(integration_v2.id),
             "action_id": "pull_observations",
-            "config_overrides": config_overrides
-        }
+            "config_overrides": config_overrides,
+        },
     )
 
     assert response.status_code == 200
     assert mock_config_manager.get_integration_details.called
     assert not mock_gundi_client_v2.get_integration_details.called
-    mock_action_handler, mock_config, mock_datamodel = mock_action_handlers["pull_observations"]
+    mock_action_handler, mock_config, mock_datamodel = mock_action_handlers[
+        "pull_observations"
+    ]
     assert mock_action_handler.called
     for k, v in config_overrides.items():
         config = mock_action_handler.call_args.kwargs["action_config"]
@@ -148,8 +174,14 @@ async def test_execute_action_from_api_with_config_overrides(
 
 @pytest.mark.asyncio
 async def test_execute_action_from_pubsub_with_config_overrides(
-        mocker, mock_gundi_client_v2, mock_publish_event, mock_action_handlers, mock_config_manager,
-        pubsub_message_request_headers, run_pull_action_pubsub_payload_with_config_overrides
+    mocker,
+    mock_gundi_client_v2,
+    mock_publish_event,
+    mock_action_handlers,
+    mock_config_manager,
+    pubsub_message_request_headers,
+    run_pull_action_pubsub_payload_with_config_overrides,
+    api_client,
 ):
     mocker.patch("app.services.action_runner.action_handlers", mock_action_handlers)
     mocker.patch("app.services.action_runner._portal", mock_gundi_client_v2)
@@ -166,9 +198,13 @@ async def test_execute_action_from_pubsub_with_config_overrides(
     assert response.status_code == 200
     assert mock_config_manager.get_integration_details.called
     assert not mock_gundi_client_v2.get_integration_details.called
-    mock_action_handler, mock_config, mock_datamodel = mock_action_handlers["pull_observations"]
+    mock_action_handler, mock_config, mock_datamodel = mock_action_handlers[
+        "pull_observations"
+    ]
     assert mock_action_handler.called
-    encoded_data = run_pull_action_pubsub_payload_with_config_overrides["message"]["data"]
+    encoded_data = run_pull_action_pubsub_payload_with_config_overrides["message"][
+        "data"
+    ]
     decoded_data = base64.b64decode(encoded_data).decode("utf-8")
     config_overrides = json.loads(decoded_data)["config_overrides"]
     for k, v in config_overrides.items():
@@ -178,8 +214,13 @@ async def test_execute_action_from_pubsub_with_config_overrides(
 
 @pytest.mark.asyncio
 async def test_execute_action_from_api_with_invalid_config(
-        mocker, mock_gundi_client_v2, integration_v2, mock_config_manager,
-        mock_publish_event, mock_action_handlers,
+    mocker,
+    mock_gundi_client_v2,
+    integration_v2,
+    mock_config_manager,
+    mock_publish_event,
+    mock_action_handlers,
+    api_client,
 ):
     mocker.patch("app.services.action_runner.action_handlers", mock_action_handlers)
     mocker.patch("app.services.action_runner._portal", mock_gundi_client_v2)
@@ -192,8 +233,8 @@ async def test_execute_action_from_api_with_invalid_config(
         json={
             "integration_id": str(integration_v2.id),
             "action_id": "pull_observations",
-            "config_overrides": {"lookback_days": "two"}  # should be an integer
-        }
+            "config_overrides": {"lookback_days": "two"},  # should be an integer
+        },
     )
 
     assert response.status_code == 422
@@ -201,8 +242,12 @@ async def test_execute_action_from_api_with_invalid_config(
 
 @pytest.mark.asyncio
 async def test_trigger_subaction(
-        mocker, mock_gundi_client_v2, integration_v2, mock_config_manager,
-        mock_publish_event, mock_action_handlers,
+    mocker,
+    mock_gundi_client_v2,
+    integration_v2,
+    mock_config_manager,
+    mock_publish_event,
+    mock_action_handlers,
 ):
     settings.TRIGGER_ACTIONS_ALWAYS_SYNC = False
     settings.INTEGRATION_COMMANDS_TOPIC = "integration-actions-topic"
@@ -215,14 +260,11 @@ async def test_trigger_subaction(
     integration_id = str(integration_v2.id)
     action_id = "pull_observations_by_date"
     config = MockSubActionConfiguration(
-        start_datetime="2024-12-01T00:00:00Z",
-        end_datetime="2025-01-15T00:00:00Z"
+        start_datetime="2024-12-01T00:00:00Z", end_datetime="2025-01-15T00:00:00Z"
     )
 
     await trigger_action(
-        integration_id=integration_id,
-        action_id=action_id,
-        config=config
+        integration_id=integration_id, action_id=action_id, config=config
     )
 
     # Check that the action was not executed directly
@@ -241,8 +283,12 @@ async def test_trigger_subaction(
 
 @pytest.mark.asyncio
 async def test_trigger_subaction_sync(
-        mocker, mock_gundi_client_v2, integration_v2, mock_config_manager,
-        mock_publish_event, mock_action_handlers,
+    mocker,
+    mock_gundi_client_v2,
+    integration_v2,
+    mock_config_manager,
+    mock_publish_event,
+    mock_action_handlers,
 ):
     settings.TRIGGER_ACTIONS_ALWAYS_SYNC = True
     mocker.patch("app.services.action_runner.action_handlers", mock_action_handlers)
@@ -254,14 +300,11 @@ async def test_trigger_subaction_sync(
     integration_id = str(integration_v2.id)
     action_id = "pull_observations_by_date"
     config = MockSubActionConfiguration(
-        start_datetime="2024-12-01T00:00:00Z",
-        end_datetime="2025-01-15T00:00:00Z"
+        start_datetime="2024-12-01T00:00:00Z", end_datetime="2025-01-15T00:00:00Z"
     )
 
     await trigger_action(
-        integration_id=integration_id,
-        action_id=action_id,
-        config=config
+        integration_id=integration_id, action_id=action_id, config=config
     )
 
     # Check that the action was executed directly
@@ -272,15 +315,23 @@ async def test_trigger_subaction_sync(
 
 @pytest.mark.parametrize(
     "mock_action_handlers_with_request_errors",
-    ["bad_request", "internal_error" ],
-    indirect=["mock_action_handlers_with_request_errors"]
+    ["bad_request", "internal_error"],
+    indirect=["mock_action_handlers_with_request_errors"],
 )
 @pytest.mark.asyncio
 async def test_execute_action_with_handler_error(
-        mocker, mock_gundi_client_v2, integration_v2, mock_config_manager,
-        mock_publish_event, mock_action_handlers_with_request_errors
+    mocker,
+    mock_gundi_client_v2,
+    integration_v2,
+    mock_config_manager,
+    mock_publish_event,
+    mock_action_handlers_with_request_errors,
+    api_client,
 ):
-    mocker.patch("app.services.action_runner.action_handlers", mock_action_handlers_with_request_errors)
+    mocker.patch(
+        "app.services.action_runner.action_handlers",
+        mock_action_handlers_with_request_errors,
+    )
     mocker.patch("app.services.action_runner._portal", mock_gundi_client_v2)
     mocker.patch("app.services.action_runner.config_manager", mock_config_manager)
     mocker.patch("app.services.activity_logger.publish_event", mock_publish_event)
@@ -290,8 +341,8 @@ async def test_execute_action_with_handler_error(
         "/v1/actions/execute/",
         json={
             "integration_id": str(integration_v2.id),
-            "action_id": "pull_observations"
-        }
+            "action_id": "pull_observations",
+        },
     )
 
     # Check that 500 is returned to indicate that the action execution failed
@@ -306,9 +357,16 @@ async def test_execute_action_with_handler_error(
     assert "error_traceback" in error_details
     assert error_details.get("request_verb") == expected_error.request.method
     assert error_details.get("request_url") == str(expected_error.request.url)
-    assert error_details.get("request_data") == str(expected_error.request.content or expected_error.request.body)
-    assert error_details.get("server_response_status") == expected_error.response.status_code
-    assert error_details.get("server_response_body") == str(expected_error.response.text)
+    assert error_details.get("request_data") == str(
+        expected_error.request.content or expected_error.request.body
+    )
+    assert (
+        error_details.get("server_response_status")
+        == expected_error.response.status_code
+    )
+    assert error_details.get("server_response_body") == str(
+        expected_error.response.text
+    )
 
     # Check that also an event with error details was published for the activity logs
     assert mock_publish_event.called
@@ -323,7 +381,8 @@ async def test_execute_action_with_handler_error(
     assert event.payload.error_traceback
     assert event.payload.request_verb == expected_error.request.method
     assert event.payload.request_url == str(expected_error.request.url)
-    assert event.payload.request_data == str(expected_error.request.content or expected_error.request.body)
+    assert event.payload.request_data == str(
+        expected_error.request.content or expected_error.request.body
+    )
     assert event.payload.server_response_status == expected_error.response.status_code
     assert event.payload.server_response_body == str(expected_error.response.text)
-

@@ -1,1 +1,2 @@
 # Add your integration-specific dependencies here
+shapely>=2.0.0

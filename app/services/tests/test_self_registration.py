@@ -1,10 +1,7 @@
 import pytest
-from fastapi.testclient import TestClient
-from app.main import app
-from app.services.self_registration import register_integration_in_gundi
-from app.services.action_scheduler import crontab_schedule, CrontabSchedule
 
-api_client = TestClient(app)
+from app.services.action_scheduler import CrontabSchedule, crontab_schedule
+from app.services.self_registration import register_integration_in_gundi
 
 
 @pytest.mark.asyncio
@@ -52,9 +49,9 @@ async def test_register_integration_with_slug_setting(
                                 "type": "boolean",
                             },
                             "region_code": {
-                                "title": "Region Code", 
-                                "type": ["string", "null"]
-                            }
+                                "title": "Region Code",
+                                "type": ["string", "null"],
+                            },
                         },
                         "definitions": {},
                     },
@@ -70,7 +67,7 @@ async def test_register_integration_with_slug_setting(
                         "hour": "*",
                         "minute": "*/10",
                         "month_of_year": "*",
-                        "tz_offset": -5
+                        "tz_offset": -5,
                     },
                 },
                 {
@@ -82,12 +79,11 @@ async def test_register_integration_with_slug_setting(
                         "title": "MockPushActionConfiguration",
                         "type": "object",
                         "properties": {},
-                        "definitions": {}
+                        "definitions": {},
                     },
                     "ui_schema": {},
-                    "is_periodic_action": False
-                }
-
+                    "is_periodic_action": False,
+                },
             ],
             "webhook": {
                 "name": "X Tracker Webhook",
@@ -167,7 +163,7 @@ async def test_register_integration_with_slug_arg(
                             },
                             "region_code": {
                                 "title": "Region Code",
-                                "type": ["string", "null"]
+                                "type": ["string", "null"],
                             },
                         },
                         "definitions": {},
@@ -184,7 +180,7 @@ async def test_register_integration_with_slug_arg(
                         "hour": "*",
                         "minute": "*/10",
                         "month_of_year": "*",
-                        "tz_offset": -5
+                        "tz_offset": -5,
                     },
                 },
                 {
@@ -196,11 +192,11 @@ async def test_register_integration_with_slug_arg(
                         "title": "MockPushActionConfiguration",
                         "type": "object",
                         "properties": {},
-                        "definitions": {}
+                        "definitions": {},
                     },
                     "ui_schema": {},
-                    "is_periodic_action": False
-                }
+                    "is_periodic_action": False,
+                },
             ],
             "webhook": {
                 "name": "X Tracker Webhook",
@@ -282,7 +278,7 @@ async def test_register_integration_with_service_url_arg(
                             },
                             "region_code": {
                                 "title": "Region Code",
-                                "type": ["string", "null"]
+                                "type": ["string", "null"],
                             },
                         },
                         "definitions": {},
@@ -299,7 +295,7 @@ async def test_register_integration_with_service_url_arg(
                         "hour": "*",
                         "minute": "*/10",
                         "month_of_year": "*",
-                        "tz_offset": -5
+                        "tz_offset": -5,
                     },
                 },
                 {
@@ -311,11 +307,11 @@ async def test_register_integration_with_service_url_arg(
                         "title": "MockPushActionConfiguration",
                         "type": "object",
                         "properties": {},
-                        "definitions": {}
+                        "definitions": {},
                     },
                     "ui_schema": {},
-                    "is_periodic_action": False
-                }
+                    "is_periodic_action": False,
+                },
             ],
             "webhook": {
                 "name": "X Tracker Webhook",
@@ -400,7 +396,7 @@ async def test_register_integration_with_service_url_setting(
                             },
                             "region_code": {
                                 "title": "Region Code",
-                                "type": ["string", "null"]
+                                "type": ["string", "null"],
                             },
                         },
                         "definitions": {},
@@ -417,7 +413,7 @@ async def test_register_integration_with_service_url_setting(
                         "hour": "*",
                         "minute": "*/10",
                         "month_of_year": "*",
-                        "tz_offset": -5
+                        "tz_offset": -5,
                     },
                 },
                 {
@@ -429,11 +425,11 @@ async def test_register_integration_with_service_url_setting(
                         "title": "MockPushActionConfiguration",
                         "type": "object",
                         "properties": {},
-                        "definitions": {}
+                        "definitions": {},
                     },
                     "ui_schema": {},
-                    "is_periodic_action": False
-                }
+                    "is_periodic_action": False,
+                },
             ],
             "webhook": {
                 "name": "X Tracker Webhook",
@@ -548,7 +544,7 @@ async def test_register_integration_with_executable_action(
 
 @pytest.mark.asyncio
 async def test_crontab_schedule_decorator(
-        mocker, mock_publish_event, integration_v2, pull_observations_config
+    mocker, mock_publish_event, integration_v2, pull_observations_config
 ):
 
     mocker.patch("app.services.activity_logger.publish_event", mock_publish_event)
@@ -559,11 +555,11 @@ async def test_crontab_schedule_decorator(
 
     assert hasattr(action_pull_observations, "crontab_schedule")
     expected_schedule = CrontabSchedule(
-        minute='5-55/10',
-        hour='*',
-        day_of_week='*',
-        day_of_month='*',
-        month_of_year='*',
-        tz_offset=0
+        minute="5-55/10",
+        hour="*",
+        day_of_week="*",
+        day_of_month="*",
+        month_of_year="*",
+        tz_offset=0,
     )
     assert action_pull_observations.crontab_schedule == expected_schedule
