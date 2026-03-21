@@ -119,31 +119,42 @@ class Gear2GearProcessor:
         gears: List[BuoyGear],
     ) -> List[BuoyGear]:
         """
-        Remove duplicate gears, keeping the last occurrence.
+        Remove duplicate gears, keeping the last value per ID.
 
         Duplicates can occur if a gear appears in both the
         deployed and hauled API responses during a status
-        transition. The last occurrence wins, which preserves
-        the hauled copy when deployed + hauled are concatenated
-        in that order.
+        transition. The last value for a given gear ID
+        overwrites earlier ones, which preserves the hauled
+        copy when deployed + hauled are concatenated in that
+        order. The list order reflects the first time each
+        gear ID was seen.
 
         Args:
             gears: List of gears, possibly with duplicates.
 
         Returns:
-            Deduplicated list preserving insertion order.
+            Deduplicated list ordered by first occurrence of
+            each gear ID, with last value retained.
         """
         seen: Dict[str, BuoyGear] = {}
+        duplicate_count = 0
         for gear in gears:
             gear_id = str(gear.id)
             if gear_id in seen:
-                logger.warning(
-                    f"Duplicate gear {gear.display_id} "
-                    f"({gear_id}): keeping status="
-                    f"{gear.status} over "
-                    f"{seen[gear_id].status}"
+                duplicate_count += 1
+                logger.debug(
+                    "Duplicate gear %s (%s): " "keeping status=%s over %s",
+                    gear.display_id,
+                    gear_id,
+                    gear.status,
+                    seen[gear_id].status,
                 )
             seen[gear_id] = gear
+        if duplicate_count:
+            logger.info(
+                "Deduplicated %d gear(s) that appeared " "in multiple status responses",
+                duplicate_count,
+            )
         return list(seen.values())
 
     def _create_deploy_payload(self, source_gear: BuoyGear) -> Dict[str, Any]:
