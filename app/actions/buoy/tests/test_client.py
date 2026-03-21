@@ -103,10 +103,11 @@ class TestBuoyClientGetGears:
             client = BuoyClient(er_token="token", er_site="https://test.pamdas.org")
             await client.get_gears(status="deployed")
 
-            # Verify URL includes status parameter
+            # Verify status is passed as a query parameter
             assert len(mock_session.get_calls) == 1
-            url = mock_session.get_calls[0][0]
-            assert "status=deployed" in url
+            call_kwargs = mock_session.get_calls[0][1]
+            assert call_kwargs["params"]["status"] == "deployed"
+            assert call_kwargs["params"]["include_empty_location"] == "true"
 
     @pytest.mark.asyncio
     async def test_get_gears_empty_response(self):

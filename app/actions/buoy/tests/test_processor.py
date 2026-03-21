@@ -160,7 +160,7 @@ class TestGear2GearProcessorIdentifySyncActions:
         source_gears = [deployed_gear_source]
         dest_gears = []
 
-        to_deploy, to_update, to_haul = await processor._identify_sync_actions(
+        to_deploy, to_update, to_haul = processor._identify_sync_actions(
             source_gears, dest_gears
         )
 
@@ -180,7 +180,7 @@ class TestGear2GearProcessorIdentifySyncActions:
 
         dest_gear = deployed_gear_source.copy(deep=True)
 
-        to_deploy, to_update, to_haul = await processor._identify_sync_actions(
+        to_deploy, to_update, to_haul = processor._identify_sync_actions(
             [source_gear], [dest_gear]
         )
 
@@ -198,7 +198,7 @@ class TestGear2GearProcessorIdentifySyncActions:
         dest_gear = deployed_gear_source.copy(deep=True)
         dest_gear.status = "deployed"
 
-        to_deploy, to_update, to_haul = await processor._identify_sync_actions(
+        to_deploy, to_update, to_haul = processor._identify_sync_actions(
             [source_gear], [dest_gear]
         )
 
@@ -215,7 +215,7 @@ class TestGear2GearProcessorIdentifySyncActions:
         source_gears = [hauled_gear_source]
         dest_gears = []
 
-        to_deploy, to_update, to_haul = await processor._identify_sync_actions(
+        to_deploy, to_update, to_haul = processor._identify_sync_actions(
             source_gears, dest_gears
         )
 
@@ -234,7 +234,7 @@ class TestGear2GearProcessorIdentifySyncActions:
         dest_gear = deployed_gear_source.copy(deep=True)
         dest_gear.id = uuid4()  # Different gear ID
 
-        to_deploy, to_update, to_haul = await processor._identify_sync_actions(
+        to_deploy, to_update, to_haul = processor._identify_sync_actions(
             [source_gear], [dest_gear]
         )
 
@@ -249,7 +249,7 @@ class TestGear2GearProcessorIdentifySyncActions:
         source_gear = deployed_gear_source.copy(deep=True)
         dest_gear = deployed_gear_source.copy(deep=True)
 
-        to_deploy, to_update, to_haul = await processor._identify_sync_actions(
+        to_deploy, to_update, to_haul = processor._identify_sync_actions(
             [source_gear], [dest_gear]
         )
 

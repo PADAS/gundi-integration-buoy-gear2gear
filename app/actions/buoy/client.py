@@ -57,9 +57,11 @@ class BuoyClient:
         Returns:
             List of BuoyGear objects.
         """
-        url = f"{self.er_site}/api/v1.0/gear/?include_empty_location=true"
+        url = f"{self.er_site}/api/v1.0/gear/"
+        params = dict(params) if params else {}
+        params["include_empty_location"] = "true"
         if status:
-            url += f"&status={status}"
+            params["status"] = status
 
         items = []
         session = await self._get_session()

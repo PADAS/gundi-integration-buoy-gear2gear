@@ -332,7 +332,7 @@ class Gear2GearProcessor:
 
         return False
 
-    async def _identify_sync_actions(
+    def _identify_sync_actions(
         self,
         source_gears: List[BuoyGear],
         dest_gears: List[BuoyGear],
@@ -499,7 +499,7 @@ class Gear2GearProcessor:
         logger.info(f"Found {len(dest_gears)} gears in destination")
 
         # Pass both filtered and unfiltered source gears to detect gears that moved outside polygon
-        to_deploy, to_update, to_haul = await self._identify_sync_actions(
+        to_deploy, to_update, to_haul = self._identify_sync_actions(
             source_gears=filtered_source_gears,
             dest_gears=dest_gears,
             all_source_gears=all_source_gears if self._containing_shapes else None,
