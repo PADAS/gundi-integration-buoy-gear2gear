@@ -471,6 +471,13 @@ source .venv/bin/activate
 uv pip install -r requirements.txt
 ```
 
+### Run unittests
+
+```bash
+source .venv/bin/activate
+pytest
+```
+
 ### rebuild requirements
 ```
 pip-compile --output-file=requirements.txt requirements-base.in requirements-dev.in requirements.in
