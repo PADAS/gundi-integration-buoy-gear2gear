@@ -131,6 +131,12 @@ async def _pull_gear(
                 client=source_client,
                 feature_group_ids=feature_group_ids,
             )
+            if not containing_shapes:
+                raise ValueError(
+                    f"Feature groups {feature_group_ids} "
+                    "returned no polygons; aborting to avoid "
+                    "unfiltered full sync"
+                )
         except FeatureGroupNotFoundError as e:
             logger.error(f"Feature group not found: {e}")
             raise
@@ -182,9 +188,10 @@ async def _pull_gear(
                     )
                 else:
                     failure_count += 1
-                    failed_payloads.append(
-                        {"index": idx, "error": retry_result.get("response")}
+                    error_info = retry_result.get("error") or retry_result.get(
+                        "response", "Unknown error"
                     )
+                    failed_payloads.append({"index": idx, "error": error_info})
             except Exception as e:
                 logger.exception(f"Failed to retry gear {set_id} as update after 409")
                 failure_count += 1
