@@ -526,10 +526,10 @@ class Gear2GearProcessor:
         """
         logger.info("Fetching gears from source ER instance...")
         deployed_source_gears = await self._source_client.get_gears(
-            params={"page_size": 10000}, status="deployed"
+            params={"page_size": 100}, status="deployed"
         )
         hauled_source_gears = await self._source_client.get_gears(
-            params={"page_size": 10000}, status="hauled"
+            params={"page_size": 100}, status="hauled"
         )
         all_source_gears = self._deduplicate_gears(
             deployed_source_gears + hauled_source_gears
@@ -547,10 +547,10 @@ class Gear2GearProcessor:
 
         logger.info("Fetching gears from destination ER instance...")
         deployed_dest_gears = await self._destination_client.get_gears(
-            params={"page_size": 10000}, status="deployed"
+            params={"page_size": 100}, status="deployed"
         )
         hauled_dest_gears = await self._destination_client.get_gears(
-            params={"page_size": 10000}, status="hauled"
+            params={"page_size": 100}, status="hauled"
         )
         dest_gears = self._deduplicate_gears(deployed_dest_gears + hauled_dest_gears)
         logger.info(
