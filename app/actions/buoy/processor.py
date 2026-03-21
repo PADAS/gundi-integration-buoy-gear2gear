@@ -114,6 +114,38 @@ class Gear2GearProcessor:
         """Remove milliseconds from a datetime object."""
         return dt.replace(microsecond=0)
 
+    @staticmethod
+    def _deduplicate_gears(
+        gears: List[BuoyGear],
+    ) -> List[BuoyGear]:
+        """
+        Remove duplicate gears, keeping the last occurrence.
+
+        Duplicates can occur if a gear appears in both the
+        deployed and hauled API responses during a status
+        transition. The last occurrence wins, which preserves
+        the hauled copy when deployed + hauled are concatenated
+        in that order.
+
+        Args:
+            gears: List of gears, possibly with duplicates.
+
+        Returns:
+            Deduplicated list preserving insertion order.
+        """
+        seen: Dict[str, BuoyGear] = {}
+        for gear in gears:
+            gear_id = str(gear.id)
+            if gear_id in seen:
+                logger.warning(
+                    f"Duplicate gear {gear.display_id} "
+                    f"({gear_id}): keeping status="
+                    f"{gear.status} over "
+                    f"{seen[gear_id].status}"
+                )
+            seen[gear_id] = gear
+        return list(seen.values())
+
     def _create_deploy_payload(self, source_gear: BuoyGear) -> Dict[str, Any]:
         """
         Create a deployment payload from a source gear.
@@ -482,10 +514,20 @@ class Gear2GearProcessor:
             List of gear payloads ready to be sent to the destination Buoy API.
         """
         logger.info("Fetching gears from source ER instance...")
-        all_source_gears = await self._source_client.get_gears(
-            params={"page_size": 10000}
+        deployed_source_gears = await self._source_client.get_gears(
+            params={"page_size": 10000}, status="deployed"
         )
-        logger.info(f"Found {len(all_source_gears)} gears in source")
+        hauled_source_gears = await self._source_client.get_gears(
+            params={"page_size": 10000}, status="hauled"
+        )
+        all_source_gears = self._deduplicate_gears(
+            deployed_source_gears + hauled_source_gears
+        )
+        logger.info(
+            f"Found {len(all_source_gears)} gears in source "
+            f"({len(deployed_source_gears)} deployed, "
+            f"{len(hauled_source_gears)} hauled)"
+        )
 
         # Apply polygon filter if configured
         filtered_source_gears = all_source_gears
@@ -493,10 +535,18 @@ class Gear2GearProcessor:
             filtered_source_gears = self._filter_gears_by_polygon(all_source_gears)
 
         logger.info("Fetching gears from destination ER instance...")
-        dest_gears = await self._destination_client.get_gears(
-            params={"page_size": 10000}
+        deployed_dest_gears = await self._destination_client.get_gears(
+            params={"page_size": 10000}, status="deployed"
         )
-        logger.info(f"Found {len(dest_gears)} gears in destination")
+        hauled_dest_gears = await self._destination_client.get_gears(
+            params={"page_size": 10000}, status="hauled"
+        )
+        dest_gears = self._deduplicate_gears(deployed_dest_gears + hauled_dest_gears)
+        logger.info(
+            f"Found {len(dest_gears)} gears in destination "
+            f"({len(deployed_dest_gears)} deployed, "
+            f"{len(hauled_dest_gears)} hauled)"
+        )
 
         # Pass both filtered and unfiltered source gears to detect gears that moved outside polygon
         to_deploy, to_update, to_haul = self._identify_sync_actions(
