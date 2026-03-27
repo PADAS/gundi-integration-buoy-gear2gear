@@ -221,6 +221,11 @@ class Gear2GearProcessor:
         """
         Create an update payload for an existing gear.
 
+        Uses the gear-level last_updated as recorded_at so the
+        observation timestamp reflects the status/data change,
+        avoiding 409 conflicts when device-level timestamps
+        haven't changed since the previous sync.
+
         Args:
             source_gear: The gear from the source ER instance.
             dest_gear: The existing gear in the destination.
@@ -243,7 +248,7 @@ class Gear2GearProcessor:
                     device.last_updated
                 ).isoformat(),
                 "recorded_at": self._remove_milliseconds(
-                    device.last_updated
+                    source_gear.last_updated
                 ).isoformat(),
                 "device_status": source_gear.status,
                 "location": {
@@ -268,6 +273,11 @@ class Gear2GearProcessor:
         """
         Create a haul payload from a source gear that is hauled.
 
+        Uses the gear-level last_updated as recorded_at so the
+        observation timestamp reflects the haul event, avoiding
+        409 conflicts when device-level timestamps haven't
+        changed since the previous sync.
+
         Args:
             source_gear: The hauled gear from the source ER instance.
             dest_gear: The existing gear in the destination.
@@ -290,7 +300,7 @@ class Gear2GearProcessor:
                     device.last_updated
                 ).isoformat(),
                 "recorded_at": self._remove_milliseconds(
-                    device.last_updated
+                    source_gear.last_updated
                 ).isoformat(),
                 "device_status": "hauled",
                 "location": {
