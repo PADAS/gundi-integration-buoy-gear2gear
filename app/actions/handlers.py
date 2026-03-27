@@ -146,6 +146,7 @@ async def _pull_gear(
         source_client=source_client,
         destination_client=destination_client,
         containing_shapes=containing_shapes,
+        lookback_minutes=60,
     )
     gear_payloads = await processor.process()
 

@@ -443,6 +443,50 @@ class TestGear2GearProcessorProcess:
         assert dest_calls[0].kwargs["status"] == "deployed"
         assert dest_calls[1].kwargs["status"] == "hauled"
 
+    @pytest.mark.asyncio
+    async def test_process_with_lookback_sends_updated_since(
+        self,
+        mock_source_client,
+        mock_destination_client,
+    ):
+        """Test that lookback_minutes adds updated_since to source params."""
+        processor = Gear2GearProcessor(
+            source_client=mock_source_client,
+            destination_client=mock_destination_client,
+            lookback_minutes=5,
+        )
+        mock_source_client.get_gears.side_effect = [[], []]
+        mock_destination_client.get_gears.side_effect = [[], []]
+
+        await processor.process()
+
+        # Source calls should have updated_since
+        source_calls = mock_source_client.get_gears.call_args_list
+        for call in source_calls:
+            assert "updated_since" in call.kwargs["params"]
+
+        # Destination calls should NOT have updated_since
+        dest_calls = mock_destination_client.get_gears.call_args_list
+        for call in dest_calls:
+            assert "updated_since" not in call.kwargs["params"]
+
+    @pytest.mark.asyncio
+    async def test_process_without_lookback_no_updated_since(
+        self,
+        processor,
+        mock_source_client,
+        mock_destination_client,
+    ):
+        """Test that without lookback, no updated_since is sent."""
+        mock_source_client.get_gears.side_effect = [[], []]
+        mock_destination_client.get_gears.side_effect = [[], []]
+
+        await processor.process()
+
+        source_calls = mock_source_client.get_gears.call_args_list
+        for call in source_calls:
+            assert "updated_since" not in call.kwargs["params"]
+
 
 class TestGear2GearProcessorHelpers:
     """Tests for helper methods."""

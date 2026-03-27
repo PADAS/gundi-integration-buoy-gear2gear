@@ -1,6 +1,6 @@
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from shapely.geometry import MultiPolygon, Point, Polygon, shape
@@ -31,6 +31,7 @@ class Gear2GearProcessor:
         source_client: BuoyClient,
         destination_client: BuoyClient,
         containing_shapes: Optional[List[PolygonShape]] = None,
+        lookback_minutes: Optional[int] = None,
     ):
         """
         Initialize a Gear2GearProcessor instance.
@@ -41,10 +42,13 @@ class Gear2GearProcessor:
             containing_shapes: Optional list of shapely Polygon/MultiPolygon objects.
                 If provided, only gears with at least one device inside these
                 polygons will be synced.
+            lookback_minutes: If set, only fetch source gears updated
+                within this many minutes. If None, fetch all gears.
         """
         self._source_client = source_client
         self._destination_client = destination_client
         self._containing_shapes = containing_shapes or []
+        self._lookback_minutes = lookback_minutes
 
     def _gear_is_inside_polygons(self, gear: BuoyGear) -> bool:
         """
@@ -534,12 +538,25 @@ class Gear2GearProcessor:
         Returns:
             List of gear payloads ready to be sent to the destination Buoy API.
         """
+        # Build source query params with optional lookback window
+        source_params: Dict[str, Any] = {"page_size": 100}
+        if self._lookback_minutes:
+            updated_since = datetime.now(timezone.utc) - timedelta(
+                minutes=self._lookback_minutes
+            )
+            source_params["updated_since"] = updated_since.isoformat()
+            logger.info(
+                "Using lookback window: %d min " "(updated_since=%s)",
+                self._lookback_minutes,
+                source_params["updated_since"],
+            )
+
         logger.info("Fetching gears from source ER instance...")
         deployed_source_gears = await self._source_client.get_gears(
-            params={"page_size": 100}, status="deployed"
+            params=dict(source_params), status="deployed"
         )
         hauled_source_gears = await self._source_client.get_gears(
-            params={"page_size": 100}, status="hauled"
+            params=dict(source_params), status="hauled"
         )
         all_source_gears = self._deduplicate_gears(
             deployed_source_gears + hauled_source_gears
@@ -555,6 +572,7 @@ class Gear2GearProcessor:
         if self._containing_shapes:
             filtered_source_gears = self._filter_gears_by_polygon(all_source_gears)
 
+        # Destination always fetches all gears for full comparison
         logger.info("Fetching gears from destination ER instance...")
         deployed_dest_gears = await self._destination_client.get_gears(
             params={"page_size": 100}, status="deployed"
