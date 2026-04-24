@@ -97,6 +97,55 @@ class TestGear2GearProcessorPayloadCreation:
         device = payload["devices"][0]
         assert device["device_status"] == "hauled"
 
+    def test_update_payload_clamps_recorded_at_past_dest_deploy(
+        self, processor, deployed_gear_source
+    ):
+        """
+        When the destination has been re-deployed with last_deployed later
+        than source.last_updated, recorded_at must be pushed past it.
+        Otherwise ER builds an inverted assigned_range and returns a 500.
+        """
+        source_gear = deployed_gear_source.copy(deep=True)
+        source_gear.status = "hauled"
+        source_gear.last_updated = datetime(2024, 2, 1, 10, 0, 0, tzinfo=timezone.utc)
+
+        dest_gear = deployed_gear_source.copy(deep=True)
+        dest_gear.devices[0].last_deployed = datetime(
+            2024, 3, 1, 10, 0, 0, tzinfo=timezone.utc
+        )
+
+        payload = processor.create_update_payload(source_gear, dest_gear)
+
+        expected = datetime(2024, 3, 1, 10, 0, 1, tzinfo=timezone.utc).isoformat()
+        assert payload["devices"][0]["recorded_at"] == expected
+
+    def test_haul_payload_clamps_recorded_at_past_dest_deploy(
+        self, processor, hauled_gear_source, deployed_gear_source
+    ):
+        """Haul path applies the same assigned_range clamp as updates."""
+        dest_gear = deployed_gear_source.copy(deep=True)
+        dest_gear.devices[0].last_deployed = datetime(
+            2024, 3, 1, 10, 0, 0, tzinfo=timezone.utc
+        )
+
+        payload = processor._create_haul_payload(hauled_gear_source, dest_gear)
+
+        expected = datetime(2024, 3, 1, 10, 0, 1, tzinfo=timezone.utc).isoformat()
+        assert payload["devices"][0]["recorded_at"] == expected
+
+    def test_update_payload_preserves_recorded_at_when_source_is_newer(
+        self, processor, updated_gear_source, deployed_gear_source
+    ):
+        """No clamp when source.last_updated already exceeds all deploys."""
+        payload = processor.create_update_payload(
+            updated_gear_source, deployed_gear_source
+        )
+
+        expected = processor._remove_milliseconds(
+            updated_gear_source.last_updated
+        ).isoformat()
+        assert payload["devices"][0]["recorded_at"] == expected
+
 
 class TestGear2GearProcessorNeedsUpdate:
     """Tests for the _needs_update method."""
@@ -124,10 +173,13 @@ class TestGear2GearProcessorNeedsUpdate:
 
         assert processor.needs_update(source_gear, dest_gear) is True
 
-    def test_needs_update_location_changed(self, processor, deployed_gear_source):
-        """Test that location change triggers update."""
+    def test_needs_update_location_changed_with_newer_source(
+        self, processor, deployed_gear_source
+    ):
+        """Location change with newer source timestamp triggers update."""
         dest_gear = deployed_gear_source.copy(deep=True)
         source_gear = deployed_gear_source.copy(deep=True)
+        source_gear.last_updated = datetime(2024, 2, 1, 10, 0, 0, tzinfo=timezone.utc)
         source_gear.devices[0].location = DeviceLocation(
             latitude=46.0, longitude=-121.0
         )
@@ -138,6 +190,43 @@ class TestGear2GearProcessorNeedsUpdate:
         """Test that no change doesn't trigger update."""
         dest_gear = deployed_gear_source.copy(deep=True)
         source_gear = deployed_gear_source.copy(deep=True)
+
+        assert processor.needs_update(source_gear, dest_gear) is False
+
+    def test_needs_update_both_hauled_skipped(self, processor, deployed_gear_source):
+        """When both sides are hauled, skip even with a newer source.
+
+        Regression: ER rejects re-haul with 400 "Device X is already hauled".
+        """
+        dest_gear = deployed_gear_source.copy(deep=True)
+        dest_gear.status = "hauled"
+
+        source_gear = deployed_gear_source.copy(deep=True)
+        source_gear.status = "hauled"
+        # Source is newer than dest — would normally trigger an update
+        source_gear.last_updated = datetime(2024, 2, 1, 10, 0, 0, tzinfo=timezone.utc)
+
+        assert processor.needs_update(source_gear, dest_gear) is False
+
+    def test_needs_update_stale_source_skipped_even_with_location_diff(
+        self, processor, deployed_gear_source
+    ):
+        """When source is older than dest, skip even if device locations differ.
+
+        Regression: ER's assigned_range constructor throws a 500 when the
+        destination has been re-deployed with last_deployed > source.last_updated
+        and we push a stale update with recorded_at = source.last_updated.
+        """
+        dest_gear = deployed_gear_source.copy(deep=True)
+        dest_gear.last_updated = datetime(2024, 1, 20, 10, 0, 0, tzinfo=timezone.utc)
+
+        source_gear = deployed_gear_source.copy(deep=True)
+        # Source is older than destination
+        source_gear.last_updated = datetime(2024, 1, 15, 10, 0, 0, tzinfo=timezone.utc)
+        # ...and locations differ
+        source_gear.devices[0].location = DeviceLocation(
+            latitude=46.0, longitude=-121.0
+        )
 
         assert processor.needs_update(source_gear, dest_gear) is False
 

@@ -120,6 +120,29 @@ class Gear2GearProcessor:
         """Remove milliseconds from a datetime object."""
         return dt.replace(microsecond=0)
 
+    def _safe_recorded_at(self, source_gear: BuoyGear, dest_gear: BuoyGear) -> datetime:
+        """
+        Pick a recorded_at that won't invert ER's assigned_range.
+
+        ER stores each device's deployment as a tstzrange whose lower bound is
+        the device's last_deployed. An incoming observation closes the range at
+        recorded_at, so recorded_at must be strictly greater than every
+        last_deployed we know about for this gear — on either side of the sync.
+        Otherwise Postgres raises "range lower bound must be less than or equal
+        to range upper bound" and the request 500s.
+        """
+        deploys = [
+            d.last_deployed or d.last_updated
+            for d in list(source_gear.devices) + list(dest_gear.devices)
+        ]
+        deploys = [d for d in deploys if d is not None]
+        latest_deploy = max(deploys) if deploys else None
+
+        recorded_at = source_gear.last_updated
+        if latest_deploy and recorded_at <= latest_deploy:
+            recorded_at = latest_deploy + timedelta(seconds=1)
+        return recorded_at
+
     @staticmethod
     def _deduplicate_gears(
         gears: List[BuoyGear],
@@ -230,7 +253,9 @@ class Gear2GearProcessor:
         Uses the gear-level last_updated as recorded_at so the
         observation timestamp reflects the status/data change,
         avoiding 409 conflicts when device-level timestamps
-        haven't changed since the previous sync.
+        haven't changed since the previous sync. The timestamp
+        is clamped past the latest known deployment on either
+        side — see _safe_recorded_at.
 
         Args:
             source_gear: The gear from the source ER instance.
@@ -239,6 +264,7 @@ class Gear2GearProcessor:
         Returns:
             Dict in the format expected by /api/v1.0/gear/ POST endpoint.
         """
+        recorded_at = self._safe_recorded_at(source_gear, dest_gear)
         devices = []
 
         for device in source_gear.devices:
@@ -253,9 +279,7 @@ class Gear2GearProcessor:
                 "last_updated": self._remove_milliseconds(
                     device.last_updated
                 ).isoformat(),
-                "recorded_at": self._remove_milliseconds(
-                    source_gear.last_updated
-                ).isoformat(),
+                "recorded_at": self._remove_milliseconds(recorded_at).isoformat(),
                 "device_status": source_gear.status,
                 "location": {
                     "latitude": device.location.latitude,
@@ -282,7 +306,9 @@ class Gear2GearProcessor:
         Uses the gear-level last_updated as recorded_at so the
         observation timestamp reflects the haul event, avoiding
         409 conflicts when device-level timestamps haven't
-        changed since the previous sync.
+        changed since the previous sync. The timestamp is
+        clamped past the latest known deployment on either side
+        — see _safe_recorded_at.
 
         Args:
             source_gear: The hauled gear from the source ER instance.
@@ -291,6 +317,7 @@ class Gear2GearProcessor:
         Returns:
             Dict in the format expected by /api/v1.0/gear/ POST endpoint.
         """
+        recorded_at = self._safe_recorded_at(source_gear, dest_gear)
         devices = []
 
         for device in source_gear.devices:
@@ -305,9 +332,7 @@ class Gear2GearProcessor:
                 "last_updated": self._remove_milliseconds(
                     device.last_updated
                 ).isoformat(),
-                "recorded_at": self._remove_milliseconds(
-                    source_gear.last_updated
-                ).isoformat(),
+                "recorded_at": self._remove_milliseconds(recorded_at).isoformat(),
                 "device_status": "hauled",
                 "location": {
                     "latitude": device.location.latitude,
@@ -368,28 +393,24 @@ class Gear2GearProcessor:
         Returns:
             True if the destination gear needs updating.
         """
-        # Check if status changed
+        # A status change always needs to be synced, even backwards in time.
         if source_gear.status != dest_gear.status:
             return True
 
-        # Check if source has newer data
-        if source_gear.last_updated > dest_gear.last_updated:
-            return True
+        # Hauled is terminal on the destination side: Buoy ER rejects
+        # re-haul with 400 "Device X is already hauled". Once both sides
+        # agree the gear is hauled, there's nothing left to push.
+        if source_gear.status == "hauled":
+            return False
 
-        # Check if any device locations changed
-        source_locations = {
-            d.mfr_device_id: (d.location.latitude, d.location.longitude)
-            for d in source_gear.devices
-        }
-        dest_locations = {
-            d.mfr_device_id: (d.location.latitude, d.location.longitude)
-            for d in dest_gear.devices
-        }
-
-        if source_locations != dest_locations:
-            return True
-
-        return False
+        # Otherwise only push an update when the source has strictly newer
+        # data. If the destination is newer (or equal), the source has
+        # nothing to contribute and we'd risk overwriting fresher dest
+        # state — or, when the dest has since been re-deployed with a
+        # last_deployed past source.last_updated, triggering a 500 from
+        # ER's assigned_range constructor ("range lower bound must be
+        # less than or equal to range upper bound").
+        return source_gear.last_updated > dest_gear.last_updated
 
     def _identify_sync_actions(
         self,
