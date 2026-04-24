@@ -13,6 +13,8 @@ logger = logging.getLogger(__name__)
 # Type alias for polygon shapes
 PolygonShape = Union[Polygon, MultiPolygon]
 
+GEAR_API_PAGE_SIZE = 500
+
 
 class Gear2GearProcessor:
     """
@@ -539,7 +541,7 @@ class Gear2GearProcessor:
             List of gear payloads ready to be sent to the destination Buoy API.
         """
         # Build source query params with optional lookback window
-        source_params: Dict[str, Any] = {"page_size": 100}
+        source_params: Dict[str, Any] = {"page_size": GEAR_API_PAGE_SIZE}
         if self._lookback_minutes:
             updated_since = datetime.now(timezone.utc) - timedelta(
                 minutes=self._lookback_minutes
@@ -575,10 +577,10 @@ class Gear2GearProcessor:
         # Destination always fetches all gears for full comparison
         logger.info("Fetching gears from destination ER instance...")
         deployed_dest_gears = await self._destination_client.get_gears(
-            params={"page_size": 100}, status="deployed"
+            params={"page_size": GEAR_API_PAGE_SIZE}, status="deployed"
         )
         hauled_dest_gears = await self._destination_client.get_gears(
-            params={"page_size": 100}, status="hauled"
+            params={"page_size": GEAR_API_PAGE_SIZE}, status="hauled"
         )
         dest_gears = self._deduplicate_gears(deployed_dest_gears + hauled_dest_gears)
         logger.info(

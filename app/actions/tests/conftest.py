@@ -34,7 +34,7 @@ def gear2gear_auth_config():
 def gear2gear_pull_config():
     """Sample pull configuration for gear2gear."""
     return Gear2GearPullConfiguration(
-        sync_interval_minutes=5,
+        lookback_minutes=60,
     )
 
 
