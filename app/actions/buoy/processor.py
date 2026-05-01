@@ -439,32 +439,22 @@ class Gear2GearProcessor:
         to_update: List[Tuple[BuoyGear, BuoyGear]] = []
         to_haul: List[Tuple[BuoyGear, BuoyGear]] = []
 
-        # Build lookup by gear ID
+        # IDs are preserved end-to-end: a gear's set_id and each device_id are
+        # written through from source to destination on deploy and reused on
+        # update/haul. Match strictly by set_id — falling back to
+        # mfr_device_id lets a new source gear hijack an unrelated dest gear
+        # that happens to share a physical device (e.g. a hauled gear that's
+        # been redeployed in source under a new set_id).
         dest_gear_by_id: Dict[str, BuoyGear] = {
             str(gear.id): gear for gear in dest_gears
         }
-
-        # Also build lookup by mfr_device_id for matching
-        dest_gear_by_mfr_id: Dict[str, BuoyGear] = {}
-        for gear in dest_gears:
-            for device in gear.devices:
-                dest_gear_by_mfr_id[device.mfr_device_id] = gear
 
         # Track which destination gears we've processed
         processed_dest_gear_ids: Set[str] = set()
 
         for source_gear in source_gears:
             source_id = str(source_gear.id)
-
-            # Try to find matching destination gear by ID first
             dest_gear = dest_gear_by_id.get(source_id)
-
-            # If not found by ID, try by mfr_device_id
-            if dest_gear is None:
-                for device in source_gear.devices:
-                    dest_gear = dest_gear_by_mfr_id.get(device.mfr_device_id)
-                    if dest_gear:
-                        break
 
             if dest_gear is None:
                 # Gear doesn't exist in destination
@@ -505,14 +495,9 @@ class Gear2GearProcessor:
         # Check for destination gears that moved outside the polygon
         # Only do this if we have polygon filtering (all_source_gears provided)
         if all_source_gears is not None:
-            # Build lookup for all source gears (unfiltered)
             all_source_by_id: Dict[str, BuoyGear] = {
                 str(gear.id): gear for gear in all_source_gears
             }
-            all_source_by_mfr_id: Dict[str, BuoyGear] = {}
-            for gear in all_source_gears:
-                for device in gear.devices:
-                    all_source_by_mfr_id[device.mfr_device_id] = gear
 
             for dest_gear in dest_gears:
                 dest_id = str(dest_gear.id)
@@ -523,14 +508,7 @@ class Gear2GearProcessor:
                 if dest_gear.status != "deployed":
                     continue
 
-                # Check if this destination gear matches any source gear
                 matching_source = all_source_by_id.get(dest_id)
-                if matching_source is None:
-                    for device in dest_gear.devices:
-                        matching_source = all_source_by_mfr_id.get(device.mfr_device_id)
-                        if matching_source:
-                            break
-
                 if matching_source is not None:
                     # This gear exists in source but wasn't in filtered list
                     # It means the gear moved outside the polygon - haul it

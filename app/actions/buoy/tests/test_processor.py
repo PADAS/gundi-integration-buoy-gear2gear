@@ -314,22 +314,51 @@ class TestGear2GearProcessorIdentifySyncActions:
         assert len(to_haul) == 0
 
     @pytest.mark.asyncio
-    async def test_match_by_mfr_device_id(self, processor, deployed_gear_source):
-        """Test that gears are matched by mfr_device_id when IDs differ."""
+    async def test_different_set_ids_do_not_match(
+        self, processor, deployed_gear_source
+    ):
+        """Set_ids are preserved end-to-end, so a source gear with a set_id
+        unknown to the destination must deploy fresh — even if it shares
+        mfr_device_ids with an existing dest gear.
+        """
         source_gear = deployed_gear_source.copy(deep=True)
         source_gear.last_updated = datetime(2024, 2, 1, 10, 0, 0, tzinfo=timezone.utc)
 
-        # Destination has same mfr_device_id but different gear ID
         dest_gear = deployed_gear_source.copy(deep=True)
-        dest_gear.id = uuid4()  # Different gear ID
+        dest_gear.id = uuid4()
 
         to_deploy, to_update, to_haul = processor._identify_sync_actions(
             [source_gear], [dest_gear]
         )
 
-        # Should match by mfr_device_id and mark for update
-        assert len(to_deploy) == 0
-        assert len(to_update) == 1
+        assert len(to_deploy) == 1
+        assert to_deploy[0].id == source_gear.id
+        assert len(to_update) == 0
+        assert len(to_haul) == 0
+
+    @pytest.mark.asyncio
+    async def test_redeploy_after_haul_does_not_match_hauled_dest(
+        self, processor, deployed_gear_source
+    ):
+        """Regression: a new source set_id sharing physical devices with a
+        hauled dest gear must deploy fresh, not update the hauled gear.
+        """
+        hauled_dest_gear = deployed_gear_source.copy(deep=True)
+        hauled_dest_gear.status = "hauled"
+
+        new_source_gear = deployed_gear_source.copy(deep=True)
+        new_source_gear.id = uuid4()
+        new_source_gear.last_updated = datetime(
+            2024, 2, 1, 10, 0, 0, tzinfo=timezone.utc
+        )
+
+        to_deploy, to_update, to_haul = processor._identify_sync_actions(
+            [new_source_gear], [hauled_dest_gear]
+        )
+
+        assert len(to_deploy) == 1
+        assert to_deploy[0].id == new_source_gear.id
+        assert len(to_update) == 0
         assert len(to_haul) == 0
 
     @pytest.mark.asyncio
@@ -943,17 +972,19 @@ class TestGear2GearProcessorPolygonFiltering:
         assert payloads[0]["devices"][0]["device_status"] == "hauled"
 
     @pytest.mark.asyncio
-    async def test_process_hauls_gear_moved_outside_polygon_by_mfr_id(
+    async def test_process_does_not_match_dest_gear_by_mfr_id(
         self, mock_source_client, mock_destination_client, test_polygon
     ):
-        """Test gear matched by mfr_device_id is hauled when moved outside polygon."""
+        """Set_ids are preserved end-to-end. A dest gear with a different
+        set_id from any source gear is unrelated, even if it shares an
+        mfr_device_id, and must not be hauled or updated.
+        """
         processor = Gear2GearProcessor(
             source_client=mock_source_client,
             destination_client=mock_destination_client,
             containing_shapes=[test_polygon],
         )
 
-        # Source gear is outside polygon
         source_gear = BuoyGear(
             id=uuid4(),
             display_id="GEAR-SOURCE",
@@ -964,7 +995,7 @@ class TestGear2GearProcessorPolygonFiltering:
                     device_id="dev-1",
                     mfr_device_id="shared-mfr-id",
                     label="Device 1",
-                    location=DeviceLocation(latitude=50.0, longitude=-130.0),  # Outside
+                    location=DeviceLocation(latitude=50.0, longitude=-130.0),
                     last_updated=datetime(2024, 1, 15, 10, 0, 0, tzinfo=timezone.utc),
                     last_deployed=datetime(2024, 1, 10, 8, 0, 0, tzinfo=timezone.utc),
                 )
@@ -973,20 +1004,17 @@ class TestGear2GearProcessorPolygonFiltering:
             manufacturer="TestManufacturer",
         )
 
-        # Destination gear has different ID but same mfr_device_id
         dest_gear = BuoyGear(
-            id=uuid4(),  # Different ID
+            id=uuid4(),
             display_id="GEAR-DEST",
             status="deployed",
             last_updated=datetime(2024, 1, 14, 10, 0, 0, tzinfo=timezone.utc),
             devices=[
                 BuoyDevice(
                     device_id="dev-dest",
-                    mfr_device_id="shared-mfr-id",  # Same mfr_device_id
+                    mfr_device_id="shared-mfr-id",
                     label="Device Dest",
-                    location=DeviceLocation(
-                        latitude=45.0, longitude=-120.0
-                    ),  # Was inside
+                    location=DeviceLocation(latitude=45.0, longitude=-120.0),
                     last_updated=datetime(2024, 1, 14, 10, 0, 0, tzinfo=timezone.utc),
                     last_deployed=datetime(2024, 1, 10, 8, 0, 0, tzinfo=timezone.utc),
                 )
@@ -995,21 +1023,12 @@ class TestGear2GearProcessorPolygonFiltering:
             manufacturer="TestManufacturer",
         )
 
-        mock_source_client.get_gears.side_effect = [
-            [source_gear],
-            [],
-        ]  # deployed, hauled
-        mock_destination_client.get_gears.side_effect = [
-            [dest_gear],
-            [],
-        ]  # deployed, hauled
+        mock_source_client.get_gears.side_effect = [[source_gear], []]
+        mock_destination_client.get_gears.side_effect = [[dest_gear], []]
 
         payloads = await processor.process()
 
-        # Should create haul payload targeting the destination gear's ID
-        assert len(payloads) == 1
-        assert payloads[0]["set_id"] == str(dest_gear.id)
-        assert payloads[0]["devices"][0]["device_status"] == "hauled"
+        assert payloads == []
 
     @pytest.mark.asyncio
     async def test_process_does_not_haul_unrelated_dest_gear(
