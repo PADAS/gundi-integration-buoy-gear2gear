@@ -4,6 +4,7 @@ from uuid import uuid4
 import pytest
 from shapely.geometry import Polygon
 
+from app.actions.buoy.processor import ProcessResult
 from app.actions.configurations import (
     FeatureGroup,
     Gear2GearAuthConfiguration,
@@ -16,7 +17,7 @@ class TestActionAuth:
     """Tests for the action_auth handler."""
 
     @pytest.mark.asyncio
-    async def test_auth_success(self, integration_v2_gear2gear, gear2gear_auth_config):
+    async def test_auth_success(self, integration_v2_gear2gear, gear2gear_auth_config, mock_publish_event):
         """Test successful authentication to source."""
         with patch("app.actions.handlers.BuoyClient") as mock_client_class:
             mock_client = AsyncMock()
@@ -35,7 +36,7 @@ class TestActionAuth:
 
     @pytest.mark.asyncio
     async def test_auth_source_failure(
-        self, integration_v2_gear2gear, gear2gear_auth_config
+        self, integration_v2_gear2gear, gear2gear_auth_config, mock_publish_event
     ):
         """Test authentication failure on source."""
         with patch("app.actions.handlers.BuoyClient") as mock_client_class:
@@ -68,7 +69,9 @@ class TestActionPullGear:
         """Test successful gear sync."""
         with patch("app.actions.handlers.BuoyClient") as mock_client_class, patch(
             "app.actions.handlers.Gear2GearProcessor"
-        ) as mock_processor_class:
+        ) as mock_processor_class, patch(
+            "app.actions.handlers._get_destination_client"
+        ) as mock_get_dest:
             # Setup mock client
             mock_client = AsyncMock()
             mock_client.get_gears.return_value = []
@@ -77,16 +80,19 @@ class TestActionPullGear:
                 "status_code": 201,
             }
             mock_client_class.return_value = mock_client
+            mock_get_dest.return_value = mock_client
 
             # Setup mock processor
             mock_processor = AsyncMock()
-            mock_processor.process.return_value = [
-                {
-                    "set_id": str(uuid4()),
-                    "manufacturer_name": "Test",
-                    "devices": [],
-                }
-            ]
+            mock_processor.process.return_value = ProcessResult(
+                payloads=[{"set_id": str(uuid4()), "manufacturer_name": "Test", "devices": []}],
+                source_count=1,
+                filtered_count=1,
+                dest_count=0,
+                deploy_count=1,
+                update_count=0,
+                haul_count=0,
+            )
             mock_processor_class.return_value = mock_processor
 
             result = await action_pull_gear(
@@ -116,7 +122,9 @@ class TestActionPullGear:
         """Test gear sync with some failures."""
         with patch("app.actions.handlers.BuoyClient") as mock_client_class, patch(
             "app.actions.handlers.Gear2GearProcessor"
-        ) as mock_processor_class:
+        ) as mock_processor_class, patch(
+            "app.actions.handlers._get_destination_client"
+        ) as mock_get_dest:
             mock_client = AsyncMock()
             mock_client.get_gears.return_value = []
             # First send succeeds, second fails
@@ -125,12 +133,21 @@ class TestActionPullGear:
                 {"status": "error", "status_code": 400, "response": "Invalid payload"},
             ]
             mock_client_class.return_value = mock_client
+            mock_get_dest.return_value = mock_client
 
             mock_processor = AsyncMock()
-            mock_processor.process.return_value = [
-                {"set_id": str(uuid4()), "manufacturer_name": "Test", "devices": []},
-                {"set_id": str(uuid4()), "manufacturer_name": "Test", "devices": []},
-            ]
+            mock_processor.process.return_value = ProcessResult(
+                payloads=[
+                    {"set_id": str(uuid4()), "manufacturer_name": "Test", "devices": []},
+                    {"set_id": str(uuid4()), "manufacturer_name": "Test", "devices": []},
+                ],
+                source_count=2,
+                filtered_count=2,
+                dest_count=0,
+                deploy_count=2,
+                update_count=0,
+                haul_count=0,
+            )
             mock_processor_class.return_value = mock_processor
 
             result = await action_pull_gear(
@@ -155,13 +172,24 @@ class TestActionPullGear:
         """Test gear sync with no payloads (nothing to sync)."""
         with patch("app.actions.handlers.BuoyClient") as mock_client_class, patch(
             "app.actions.handlers.Gear2GearProcessor"
-        ) as mock_processor_class:
+        ) as mock_processor_class, patch(
+            "app.actions.handlers._get_destination_client"
+        ) as mock_get_dest:
             mock_client = AsyncMock()
             mock_client.get_gears.return_value = []
             mock_client_class.return_value = mock_client
+            mock_get_dest.return_value = mock_client
 
             mock_processor = AsyncMock()
-            mock_processor.process.return_value = []
+            mock_processor.process.return_value = ProcessResult(
+                payloads=[],
+                source_count=0,
+                filtered_count=0,
+                dest_count=0,
+                deploy_count=0,
+                update_count=0,
+                haul_count=0,
+            )
             mock_processor_class.return_value = mock_processor
 
             result = await action_pull_gear(
@@ -219,14 +247,10 @@ class TestConfigurationModels:
         config = Gear2GearAuthConfiguration(
             source_token="src-token",
             source_url="https://source.er.org/",
-            destination_token="dst-token",
-            destination_url="https://dest.er.org/",
         )
 
         assert config.source_token.get_secret_value() == "src-token"
         assert str(config.source_url) == "https://source.er.org/"
-        assert config.destination_token.get_secret_value() == "dst-token"
-        assert str(config.destination_url) == "https://dest.er.org/"
 
     def test_pull_config_defaults(self):
         """Test pull configuration defaults."""
@@ -285,11 +309,14 @@ class TestActionPullGearWithPolygonFiltering:
             "app.actions.handlers.Gear2GearProcessor"
         ) as mock_processor_class, patch(
             "app.actions.handlers.load_polygons_from_feature_groups"
-        ) as mock_load_polygons:
+        ) as mock_load_polygons, patch(
+            "app.actions.handlers._get_destination_client"
+        ) as mock_get_dest:
             # Setup mock client
             mock_client = AsyncMock()
             mock_client.get_gears.return_value = []
             mock_client_class.return_value = mock_client
+            mock_get_dest.return_value = mock_client
 
             # Setup mock polygon loader
             mock_polygon = Polygon([(0, 0), (0, 10), (10, 10), (10, 0), (0, 0)])
@@ -297,7 +324,15 @@ class TestActionPullGearWithPolygonFiltering:
 
             # Setup mock processor
             mock_processor = AsyncMock()
-            mock_processor.process.return_value = []
+            mock_processor.process.return_value = ProcessResult(
+                payloads=[],
+                source_count=0,
+                filtered_count=0,
+                dest_count=0,
+                deploy_count=0,
+                update_count=0,
+                haul_count=0,
+            )
             mock_processor_class.return_value = mock_processor
 
             await action_pull_gear(
@@ -329,13 +364,24 @@ class TestActionPullGearWithPolygonFiltering:
             "app.actions.handlers.Gear2GearProcessor"
         ) as mock_processor_class, patch(
             "app.actions.handlers.load_polygons_from_feature_groups"
-        ) as mock_load_polygons:
+        ) as mock_load_polygons, patch(
+            "app.actions.handlers._get_destination_client"
+        ) as mock_get_dest:
             mock_client = AsyncMock()
             mock_client.get_gears.return_value = []
             mock_client_class.return_value = mock_client
+            mock_get_dest.return_value = mock_client
 
             mock_processor = AsyncMock()
-            mock_processor.process.return_value = []
+            mock_processor.process.return_value = ProcessResult(
+                payloads=[],
+                source_count=0,
+                filtered_count=0,
+                dest_count=0,
+                deploy_count=0,
+                update_count=0,
+                haul_count=0,
+            )
             mock_processor_class.return_value = mock_processor
 
             await action_pull_gear(
@@ -367,9 +413,12 @@ class TestActionPullGearWithPolygonFiltering:
 
         with patch("app.actions.handlers.BuoyClient") as mock_client_class, patch(
             "app.actions.handlers.load_polygons_from_feature_groups"
-        ) as mock_load_polygons:
+        ) as mock_load_polygons, patch(
+            "app.actions.handlers._get_destination_client"
+        ) as mock_get_dest:
             mock_client = AsyncMock()
             mock_client_class.return_value = mock_client
+            mock_get_dest.return_value = mock_client
 
             mock_load_polygons.side_effect = FeatureGroupNotFoundError(
                 "Feature group 'nonexistent-fg' not found"

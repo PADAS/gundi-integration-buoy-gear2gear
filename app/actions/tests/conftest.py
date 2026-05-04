@@ -7,6 +7,7 @@ import pytest
 from gundi_core.schemas.v2 import Integration, IntegrationActionConfiguration
 
 from app.actions.buoy import BuoyDevice, BuoyGear, DeviceLocation
+from app.actions.buoy.processor import ProcessResult
 from app.actions.configurations import (
     Gear2GearAuthConfiguration,
     Gear2GearPullConfiguration,
@@ -25,8 +26,6 @@ def gear2gear_auth_config():
     return Gear2GearAuthConfiguration(
         source_token="source-token-123",
         source_url="https://source.pamdas.org/",
-        destination_token="dest-token-456",
-        destination_url="https://dest.pamdas.org/",
     )
 
 
@@ -139,21 +138,29 @@ def mock_buoy_client_class(mocker, sample_source_gears):
 def mock_processor_class(mocker):
     """Mock the Gear2GearProcessor class."""
     mock_processor = AsyncMock()
-    mock_processor.process.return_value = [
-        {
-            "set_id": str(uuid4()),
-            "manufacturer_name": "TestManufacturer",
-            "deployment_type": "single",
-            "devices": [
-                {
-                    "device_id": "dev-001",
-                    "mfr_device_id": "mfr-001",
-                    "device_status": "deployed",
-                    "location": {"latitude": 45.0, "longitude": -120.0},
-                }
-            ],
-        }
-    ]
+    mock_processor.process.return_value = ProcessResult(
+        payloads=[
+            {
+                "set_id": str(uuid4()),
+                "manufacturer_name": "TestManufacturer",
+                "deployment_type": "single",
+                "devices": [
+                    {
+                        "device_id": "dev-001",
+                        "mfr_device_id": "mfr-001",
+                        "device_status": "deployed",
+                        "location": {"latitude": 45.0, "longitude": -120.0},
+                    }
+                ],
+            }
+        ],
+        source_count=1,
+        filtered_count=1,
+        dest_count=0,
+        deploy_count=1,
+        update_count=0,
+        haul_count=0,
+    )
 
     mock_class = mocker.patch("app.actions.handlers.Gear2GearProcessor")
     mock_class.return_value = mock_processor
