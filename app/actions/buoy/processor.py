@@ -1,7 +1,7 @@
 import json
 import logging
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, NamedTuple, Optional, Set, Tuple, Union
 
 from shapely.geometry import MultiPolygon, Point, Polygon, shape
 
@@ -12,6 +12,16 @@ logger = logging.getLogger(__name__)
 
 # Type alias for polygon shapes
 PolygonShape = Union[Polygon, MultiPolygon]
+
+
+class ProcessResult(NamedTuple):
+    payloads: List[Dict[str, Any]]
+    source_count: int
+    filtered_count: int
+    dest_count: int
+    deploy_count: int
+    update_count: int
+    haul_count: int
 
 
 class Gear2GearProcessor:
@@ -546,7 +556,15 @@ class Gear2GearProcessor:
             json.dumps(gear_payloads, indent=2, default=str),
         )
 
-        return gear_payloads
+        return ProcessResult(
+            payloads=gear_payloads,
+            source_count=len(all_source_gears),
+            filtered_count=len(filtered_source_gears),
+            dest_count=len(dest_gears),
+            deploy_count=len(to_deploy),
+            update_count=len(to_update),
+            haul_count=len(to_haul),
+        )
 
 
 async def load_polygons_from_feature_groups(

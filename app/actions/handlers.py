@@ -2,6 +2,10 @@ import json
 import logging
 from typing import Dict
 
+import aiohttp
+import httpx
+import stamina
+from gundi_client_v2 import GundiClient
 from gundi_core.events import LogLevel
 from gundi_core.schemas.v2 import Integration
 
@@ -21,23 +25,50 @@ from app.services.utils import find_config_for_action
 logger = logging.getLogger(__name__)
 
 
+async def _get_destination_client(integration_id: str) -> BuoyClient:
+    async with GundiClient() as gundi:
+        async for attempt in stamina.retry_context(on=httpx.HTTPError, wait_initial=1.0, wait_jitter=5.0, wait_max=32.0):
+            with attempt:
+                connection = await gundi.get_connection_details(integration_id)
+
+    if not connection.destinations:
+        raise ValueError(f"No destinations configured for integration {integration_id}")
+
+    if len(connection.destinations) > 1:
+        logger.warning(f"Integration {integration_id} has multiple destinations, using first one")
+
+    destination = connection.destinations[0]
+
+    async with GundiClient() as gundi:
+        async for attempt in stamina.retry_context(on=httpx.HTTPError, wait_initial=1.0, wait_jitter=5.0, wait_max=32.0):
+            with attempt:
+                dest_integration = await gundi.get_integration_details(str(destination.id))
+
+    dest_auth = dest_integration.get_action_config("auth")
+    if not dest_auth:
+        raise ValueError(f"No auth config on destination integration {destination.id}")
+    dest_token = dest_auth.data.get("token")
+    if not dest_token:
+        raise ValueError(f"No token in auth config of destination integration {destination.id}")
+    dest_base_url = str(destination.base_url)
+
+    return BuoyClient(er_token=dest_token, er_site=dest_base_url)
+
+
+@activity_logger()
 async def action_auth(
     integration: Integration, action_config: Gear2GearAuthConfiguration
 ) -> Dict:
     """
-    Validate authentication credentials for both source and destination ER instances.
-
-    Tests connectivity to both ER instances by attempting to fetch gears.
+    Validate authentication credentials for the source ER instance.
     """
     logger.info(f"Executing auth action for integration {integration.id}...")
 
     results = {
         "source_valid": False,
-        "destination_valid": False,
         "valid_credentials": False,
     }
 
-    # Test source connection
     try:
         async with BuoyClient(
             er_token=action_config.source_token.get_secret_value(),
@@ -50,22 +81,7 @@ async def action_auth(
         logger.error(f"Source ER connection failed: {e}")
         results["source_error"] = str(e)
 
-    # Test destination connection
-    try:
-        async with BuoyClient(
-            er_token=action_config.destination_token.get_secret_value(),
-            er_site=str(action_config.destination_url),
-        ) as dest_client:
-            await dest_client.get_gears(params={"page_size": 1})
-        results["destination_valid"] = True
-        logger.info(f"Destination ER connection successful")
-    except Exception as e:
-        logger.error(f"Destination ER connection failed: {e}")
-        results["destination_error"] = str(e)
-
-    results["valid_credentials"] = (
-        results["source_valid"] and results["destination_valid"]
-    )
+    results["valid_credentials"] = results["source_valid"]
 
     return results
 
@@ -97,15 +113,11 @@ async def action_pull_gear(
 
     auth_config = Gear2GearAuthConfiguration.parse_obj(auth_config_data.data)
 
-    # Create clients for source and destination
     source_client = BuoyClient(
         er_token=auth_config.source_token.get_secret_value(),
         er_site=str(auth_config.source_url),
     )
-    destination_client = BuoyClient(
-        er_token=auth_config.destination_token.get_secret_value(),
-        er_site=str(auth_config.destination_url),
-    )
+    destination_client = await _get_destination_client(str(integration.id))
     try:
         return await _pull_gear(
             integration, action_config, source_client, destination_client
@@ -147,7 +159,33 @@ async def _pull_gear(
         destination_client=destination_client,
         containing_shapes=containing_shapes,
     )
-    gear_payloads = await processor.process()
+    integration_id = str(integration.id)
+    process_result = await processor.process()
+    gear_payloads = process_result.payloads
+    discovery_title = (
+        f"Evaluated {process_result.filtered_count} gears: "
+        f"{process_result.source_count} in source, "
+        f"{process_result.filtered_count} inside polygon, "
+        f"{process_result.dest_count} already in destination"
+    )
+    logger.info(f"[{integration_id}] {discovery_title}")
+    try:
+        await log_action_activity(
+            integration_id=integration_id,
+            action_id="pull_gear",
+            level=LogLevel.INFO,
+            title=discovery_title,
+            data={
+                "source_count": process_result.source_count,
+                "filtered_count": process_result.filtered_count,
+                "dest_count": process_result.dest_count,
+                "to_deploy": process_result.deploy_count,
+                "to_update": process_result.update_count,
+                "to_haul": process_result.haul_count,
+            },
+        )
+    except aiohttp.ClientError as e:
+        logger.warning(f"[{integration_id}] Failed to publish discovery activity log: {e}")
 
     # Send gear payloads to destination
     success_count = 0
@@ -155,13 +193,13 @@ async def _pull_gear(
     failed_payloads = []
 
     for idx, payload in enumerate(gear_payloads):
-        result = await destination_client.send_gear(payload)
-        if result.get("status") == "success":
+        send_result = await destination_client.send_gear(payload)
+        if send_result.get("status") == "success":
             success_count += 1
             logger.info(
                 f"Successfully sent gear {idx + 1}/{len(gear_payloads)} to destination"
             )
-        elif result.get("status_code") == 409:
+        elif send_result.get("status_code") == 409:
             # Gear already exists (e.g. duplicate observation); retry as update
             set_id = payload.get("set_id")
             if not set_id:
@@ -198,7 +236,7 @@ async def _pull_gear(
                 failed_payloads.append({"index": idx, "error": str(e)})
         else:
             failure_count += 1
-            error_info = result.get("error") or result.get("response", "Unknown error")
+            error_info = send_result.get("error") or send_result.get("response", "Unknown error")
             logger.error(
                 f"Failed to send gear {idx + 1}/{len(gear_payloads)} "
                 f"(set_id={payload.get('set_id')}) "
@@ -212,20 +250,28 @@ async def _pull_gear(
     # Log activity
     log_level = LogLevel.INFO if failure_count == 0 else LogLevel.WARNING
     title = (
-        f"Gear2Gear sync: {len(gear_payloads)} total, "
-        f"{success_count} successful, {failure_count} failed"
+        f"Sync complete: {success_count} sent "
+        f"({process_result.deploy_count} to deploy, "
+        f"{process_result.update_count} to update, "
+        f"{process_result.haul_count} to haul)"
     )
-    await log_action_activity(
-        integration_id=integration.id,
-        action_id="pull_gear",
-        level=log_level,
-        title=title,
-        data={
-            "total": len(gear_payloads),
-            "success": success_count,
-            "failures": failure_count,
-        },
-    )
+    if failure_count > 0:
+        title += f" ({failure_count} failed)"
+    logger.info(f"[{integration_id}] {title}")
+    try:
+        await log_action_activity(
+            integration_id=integration_id,
+            action_id="pull_gear",
+            level=log_level,
+            title=title,
+            data={
+                "total": len(gear_payloads),
+                "success": success_count,
+                "failures": failure_count,
+            },
+        )
+    except aiohttp.ClientError as e:
+        logger.warning(f"[{integration_id}] Failed to publish sync activity log: {e}")
 
     return {
         "total_payloads": len(gear_payloads),
