@@ -97,6 +97,55 @@ class TestGear2GearProcessorPayloadCreation:
         device = payload["devices"][0]
         assert device["device_status"] == "hauled"
 
+    def test_update_payload_clamps_recorded_at_past_dest_deploy(
+        self, processor, deployed_gear_source
+    ):
+        """
+        When the destination has been re-deployed with last_deployed later
+        than source.last_updated, recorded_at must be pushed past it.
+        Otherwise ER builds an inverted assigned_range and returns a 500.
+        """
+        source_gear = deployed_gear_source.copy(deep=True)
+        source_gear.status = "hauled"
+        source_gear.last_updated = datetime(2024, 2, 1, 10, 0, 0, tzinfo=timezone.utc)
+
+        dest_gear = deployed_gear_source.copy(deep=True)
+        dest_gear.devices[0].last_deployed = datetime(
+            2024, 3, 1, 10, 0, 0, tzinfo=timezone.utc
+        )
+
+        payload = processor.create_update_payload(source_gear, dest_gear)
+
+        expected = datetime(2024, 3, 1, 10, 0, 1, tzinfo=timezone.utc).isoformat()
+        assert payload["devices"][0]["recorded_at"] == expected
+
+    def test_haul_payload_clamps_recorded_at_past_dest_deploy(
+        self, processor, hauled_gear_source, deployed_gear_source
+    ):
+        """Haul path applies the same assigned_range clamp as updates."""
+        dest_gear = deployed_gear_source.copy(deep=True)
+        dest_gear.devices[0].last_deployed = datetime(
+            2024, 3, 1, 10, 0, 0, tzinfo=timezone.utc
+        )
+
+        payload = processor._create_haul_payload(hauled_gear_source, dest_gear)
+
+        expected = datetime(2024, 3, 1, 10, 0, 1, tzinfo=timezone.utc).isoformat()
+        assert payload["devices"][0]["recorded_at"] == expected
+
+    def test_update_payload_preserves_recorded_at_when_source_is_newer(
+        self, processor, updated_gear_source, deployed_gear_source
+    ):
+        """No clamp when source.last_updated already exceeds all deploys."""
+        payload = processor.create_update_payload(
+            updated_gear_source, deployed_gear_source
+        )
+
+        expected = processor._remove_milliseconds(
+            updated_gear_source.last_updated
+        ).isoformat()
+        assert payload["devices"][0]["recorded_at"] == expected
+
 
 class TestGear2GearProcessorNeedsUpdate:
     """Tests for the _needs_update method."""
@@ -124,10 +173,13 @@ class TestGear2GearProcessorNeedsUpdate:
 
         assert processor.needs_update(source_gear, dest_gear) is True
 
-    def test_needs_update_location_changed(self, processor, deployed_gear_source):
-        """Test that location change triggers update."""
+    def test_needs_update_location_changed_with_newer_source(
+        self, processor, deployed_gear_source
+    ):
+        """Location change with newer source timestamp triggers update."""
         dest_gear = deployed_gear_source.copy(deep=True)
         source_gear = deployed_gear_source.copy(deep=True)
+        source_gear.last_updated = datetime(2024, 2, 1, 10, 0, 0, tzinfo=timezone.utc)
         source_gear.devices[0].location = DeviceLocation(
             latitude=46.0, longitude=-121.0
         )
@@ -138,6 +190,43 @@ class TestGear2GearProcessorNeedsUpdate:
         """Test that no change doesn't trigger update."""
         dest_gear = deployed_gear_source.copy(deep=True)
         source_gear = deployed_gear_source.copy(deep=True)
+
+        assert processor.needs_update(source_gear, dest_gear) is False
+
+    def test_needs_update_both_hauled_skipped(self, processor, deployed_gear_source):
+        """When both sides are hauled, skip even with a newer source.
+
+        Regression: ER rejects re-haul with 400 "Device X is already hauled".
+        """
+        dest_gear = deployed_gear_source.copy(deep=True)
+        dest_gear.status = "hauled"
+
+        source_gear = deployed_gear_source.copy(deep=True)
+        source_gear.status = "hauled"
+        # Source is newer than dest — would normally trigger an update
+        source_gear.last_updated = datetime(2024, 2, 1, 10, 0, 0, tzinfo=timezone.utc)
+
+        assert processor.needs_update(source_gear, dest_gear) is False
+
+    def test_needs_update_stale_source_skipped_even_with_location_diff(
+        self, processor, deployed_gear_source
+    ):
+        """When source is older than dest, skip even if device locations differ.
+
+        Regression: ER's assigned_range constructor throws a 500 when the
+        destination has been re-deployed with last_deployed > source.last_updated
+        and we push a stale update with recorded_at = source.last_updated.
+        """
+        dest_gear = deployed_gear_source.copy(deep=True)
+        dest_gear.last_updated = datetime(2024, 1, 20, 10, 0, 0, tzinfo=timezone.utc)
+
+        source_gear = deployed_gear_source.copy(deep=True)
+        # Source is older than destination
+        source_gear.last_updated = datetime(2024, 1, 15, 10, 0, 0, tzinfo=timezone.utc)
+        # ...and locations differ
+        source_gear.devices[0].location = DeviceLocation(
+            latitude=46.0, longitude=-121.0
+        )
 
         assert processor.needs_update(source_gear, dest_gear) is False
 
@@ -225,22 +314,51 @@ class TestGear2GearProcessorIdentifySyncActions:
         assert len(to_haul) == 0
 
     @pytest.mark.asyncio
-    async def test_match_by_mfr_device_id(self, processor, deployed_gear_source):
-        """Test that gears are matched by mfr_device_id when IDs differ."""
+    async def test_different_set_ids_do_not_match(
+        self, processor, deployed_gear_source
+    ):
+        """Set_ids are preserved end-to-end, so a source gear with a set_id
+        unknown to the destination must deploy fresh — even if it shares
+        mfr_device_ids with an existing dest gear.
+        """
         source_gear = deployed_gear_source.copy(deep=True)
         source_gear.last_updated = datetime(2024, 2, 1, 10, 0, 0, tzinfo=timezone.utc)
 
-        # Destination has same mfr_device_id but different gear ID
         dest_gear = deployed_gear_source.copy(deep=True)
-        dest_gear.id = uuid4()  # Different gear ID
+        dest_gear.id = uuid4()
 
         to_deploy, to_update, to_haul = processor._identify_sync_actions(
             [source_gear], [dest_gear]
         )
 
-        # Should match by mfr_device_id and mark for update
-        assert len(to_deploy) == 0
-        assert len(to_update) == 1
+        assert len(to_deploy) == 1
+        assert to_deploy[0].id == source_gear.id
+        assert len(to_update) == 0
+        assert len(to_haul) == 0
+
+    @pytest.mark.asyncio
+    async def test_redeploy_after_haul_does_not_match_hauled_dest(
+        self, processor, deployed_gear_source
+    ):
+        """Regression: a new source set_id sharing physical devices with a
+        hauled dest gear must deploy fresh, not update the hauled gear.
+        """
+        hauled_dest_gear = deployed_gear_source.copy(deep=True)
+        hauled_dest_gear.status = "hauled"
+
+        new_source_gear = deployed_gear_source.copy(deep=True)
+        new_source_gear.id = uuid4()
+        new_source_gear.last_updated = datetime(
+            2024, 2, 1, 10, 0, 0, tzinfo=timezone.utc
+        )
+
+        to_deploy, to_update, to_haul = processor._identify_sync_actions(
+            [new_source_gear], [hauled_dest_gear]
+        )
+
+        assert len(to_deploy) == 1
+        assert to_deploy[0].id == new_source_gear.id
+        assert len(to_update) == 0
         assert len(to_haul) == 0
 
     @pytest.mark.asyncio
@@ -273,14 +391,14 @@ class TestGear2GearProcessorProcess:
         self, processor, mock_source_client, mock_destination_client
     ):
         """Test processing with no gears in source."""
-        mock_source_client.get_gears.return_value = []
-        mock_destination_client.get_gears.return_value = []
+        mock_source_client.get_gears.side_effect = [[], []]  # deployed, hauled
+        mock_destination_client.get_gears.side_effect = [[], []]  # deployed, hauled
 
         payloads = await processor.process()
 
         assert payloads == []
-        mock_source_client.get_gears.assert_called_once()
-        mock_destination_client.get_gears.assert_called_once()
+        assert mock_source_client.get_gears.call_count == 2
+        assert mock_destination_client.get_gears.call_count == 2
 
     @pytest.mark.asyncio
     async def test_process_new_deployment(
@@ -291,8 +409,11 @@ class TestGear2GearProcessorProcess:
         deployed_gear_source,
     ):
         """Test processing a new gear deployment."""
-        mock_source_client.get_gears.return_value = [deployed_gear_source]
-        mock_destination_client.get_gears.return_value = []
+        mock_source_client.get_gears.side_effect = [
+            [deployed_gear_source],
+            [],
+        ]  # deployed, hauled
+        mock_destination_client.get_gears.side_effect = [[], []]  # deployed, hauled
 
         payloads = await processor.process()
 
@@ -315,8 +436,14 @@ class TestGear2GearProcessorProcess:
         dest_gear = deployed_gear_source.copy(deep=True)
         dest_gear.status = "deployed"
 
-        mock_source_client.get_gears.return_value = [source_gear]
-        mock_destination_client.get_gears.return_value = [dest_gear]
+        mock_source_client.get_gears.side_effect = [
+            [],
+            [source_gear],
+        ]  # deployed, hauled
+        mock_destination_client.get_gears.side_effect = [
+            [dest_gear],
+            [],
+        ]  # deployed, hauled
 
         payloads = await processor.process()
 
@@ -347,8 +474,14 @@ class TestGear2GearProcessorProcess:
 
         existing_dest = trawl_gear_source.copy(deep=True)
 
-        mock_source_client.get_gears.return_value = [new_gear, updated_source]
-        mock_destination_client.get_gears.return_value = [existing_dest]
+        mock_source_client.get_gears.side_effect = [
+            [new_gear, updated_source],
+            [],
+        ]  # deployed, hauled
+        mock_destination_client.get_gears.side_effect = [
+            [existing_dest],
+            [],
+        ]  # deployed, hauled
 
         payloads = await processor.process()
 
@@ -358,6 +491,119 @@ class TestGear2GearProcessorProcess:
         set_ids = [p["set_id"] for p in payloads]
         assert str(new_gear.id) in set_ids
         assert str(updated_source.id) in set_ids
+
+    @pytest.mark.asyncio
+    async def test_process_deployed_and_hauled_from_source(
+        self,
+        processor,
+        mock_source_client,
+        mock_destination_client,
+        deployed_gear_source,
+        trawl_gear_source,
+    ):
+        """Test processing with both deployed and hauled gears from source."""
+        # A new deployed gear
+        new_gear = deployed_gear_source.copy(deep=True)
+        new_gear.id = uuid4()
+        new_gear.display_id = "NEW-GEAR"
+        new_gear.devices[0].mfr_device_id = "new-mfr-id"
+
+        # A hauled gear that exists deployed in destination
+        hauled_gear = trawl_gear_source.copy(deep=True)
+        hauled_gear.status = "hauled"
+
+        dest_gear = trawl_gear_source.copy(deep=True)
+        dest_gear.status = "deployed"
+
+        mock_source_client.get_gears.side_effect = [
+            [new_gear],  # deployed
+            [hauled_gear],  # hauled
+        ]
+        mock_destination_client.get_gears.side_effect = [
+            [dest_gear],  # deployed
+            [],  # hauled
+        ]
+
+        payloads = await processor.process()
+
+        assert len(payloads) == 2
+        set_ids = [p["set_id"] for p in payloads]
+        assert str(new_gear.id) in set_ids
+        assert str(trawl_gear_source.id) in set_ids
+
+        # Verify correct actions
+        for p in payloads:
+            if p["set_id"] == str(new_gear.id):
+                assert p["devices"][0]["device_status"] == "deployed"
+            else:
+                assert p["devices"][0]["device_status"] == "hauled"
+
+    @pytest.mark.asyncio
+    async def test_process_passes_correct_status_params(
+        self,
+        processor,
+        mock_source_client,
+        mock_destination_client,
+    ):
+        """Test that get_gears is called with correct status params."""
+        mock_source_client.get_gears.side_effect = [[], []]
+        mock_destination_client.get_gears.side_effect = [[], []]
+
+        await processor.process()
+
+        source_calls = mock_source_client.get_gears.call_args_list
+        assert len(source_calls) == 2
+        assert source_calls[0].kwargs["status"] == "deployed"
+        assert source_calls[1].kwargs["status"] == "hauled"
+
+        dest_calls = mock_destination_client.get_gears.call_args_list
+        assert len(dest_calls) == 2
+        assert dest_calls[0].kwargs["status"] == "deployed"
+        assert dest_calls[1].kwargs["status"] == "hauled"
+
+    @pytest.mark.asyncio
+    async def test_process_with_lookback_sends_updated_since(
+        self,
+        mock_source_client,
+        mock_destination_client,
+    ):
+        """Test that lookback_minutes adds updated_since to source params."""
+        processor = Gear2GearProcessor(
+            source_client=mock_source_client,
+            destination_client=mock_destination_client,
+            lookback_minutes=5,
+        )
+        mock_source_client.get_gears.side_effect = [[], []]
+        mock_destination_client.get_gears.side_effect = [[], []]
+
+        await processor.process()
+
+        # Source calls should have updated_since
+        source_calls = mock_source_client.get_gears.call_args_list
+        for call in source_calls:
+            assert "updated_since" in call.kwargs["params"]
+
+        # Destination calls should NOT have updated_since
+        dest_calls = mock_destination_client.get_gears.call_args_list
+        for call in dest_calls:
+            assert "updated_since" not in call.kwargs["params"]
+
+    @pytest.mark.asyncio
+    async def test_process_without_lookback_no_updated_since(
+        self,
+        processor,
+        mock_source_client,
+        mock_destination_client,
+    ):
+        """Test that without lookback, no updated_since is sent."""
+        mock_source_client.get_gears.side_effect = [[], []]
+        mock_destination_client.get_gears.side_effect = [[], []]
+
+        await processor.process()
+
+        source_calls = mock_source_client.get_gears.call_args_list
+        for call in source_calls:
+            assert "updated_since" not in call.kwargs["params"]
 
 
 class TestGear2GearProcessorHelpers:
@@ -378,6 +624,61 @@ class TestGear2GearProcessorHelpers:
         assert result.microsecond == 0
         assert result.second == 45
         assert result.minute == 30
+
+    def test_deduplicate_gears_no_duplicates(
+        self, deployed_gear_source, trawl_gear_source
+    ):
+        """Test deduplication with no duplicates is a no-op."""
+        gears = [deployed_gear_source, trawl_gear_source]
+        result = Gear2GearProcessor._deduplicate_gears(gears)
+        assert len(result) == 2
+
+    def test_deduplicate_gears_keeps_last(self, deployed_gear_source):
+        """Test that deduplication keeps the last occurrence."""
+        deployed = deployed_gear_source.copy(deep=True)
+        deployed.status = "deployed"
+
+        hauled = deployed_gear_source.copy(deep=True)
+        hauled.status = "hauled"
+
+        # deployed + hauled order: hauled wins
+        result = Gear2GearProcessor._deduplicate_gears([deployed, hauled])
+        assert len(result) == 1
+        assert result[0].status == "hauled"
+
+    @pytest.mark.asyncio
+    async def test_process_deduplicates_source_gears(
+        self,
+        processor,
+        mock_source_client,
+        mock_destination_client,
+        deployed_gear_source,
+    ):
+        """Test that duplicate gears across deployed/hauled are deduplicated."""
+        deployed = deployed_gear_source.copy(deep=True)
+        deployed.status = "deployed"
+
+        hauled = deployed_gear_source.copy(deep=True)
+        hauled.status = "hauled"
+
+        dest_gear = deployed_gear_source.copy(deep=True)
+        dest_gear.status = "deployed"
+
+        # Same gear appears in both deployed and hauled responses
+        mock_source_client.get_gears.side_effect = [
+            [deployed],  # deployed
+            [hauled],  # hauled
+        ]
+        mock_destination_client.get_gears.side_effect = [
+            [dest_gear],  # deployed
+            [],  # hauled
+        ]
+
+        payloads = await processor.process()
+
+        # Should produce exactly one haul payload, not two actions
+        assert len(payloads) == 1
+        assert payloads[0]["devices"][0]["device_status"] == "hauled"
 
 
 class TestGear2GearProcessorPolygonFiltering:
@@ -625,11 +926,11 @@ class TestGear2GearProcessorPolygonFiltering:
             containing_shapes=[test_polygon],
         )
 
-        mock_source_client.get_gears.return_value = [
-            gear_inside_polygon,
-            gear_outside_polygon,
+        mock_source_client.get_gears.side_effect = [
+            [gear_inside_polygon, gear_outside_polygon],  # deployed
+            [],  # hauled
         ]
-        mock_destination_client.get_gears.return_value = []
+        mock_destination_client.get_gears.side_effect = [[], []]  # deployed, hauled
 
         payloads = await processor.process()
 
@@ -654,9 +955,13 @@ class TestGear2GearProcessorPolygonFiltering:
         )
 
         # Gear is outside polygon in source, but exists deployed in destination
-        mock_source_client.get_gears.return_value = [gear_outside_polygon]
-        mock_destination_client.get_gears.return_value = [
-            gear_outside_polygon.copy(deep=True)
+        mock_source_client.get_gears.side_effect = [
+            [gear_outside_polygon],  # deployed
+            [],  # hauled
+        ]
+        mock_destination_client.get_gears.side_effect = [
+            [gear_outside_polygon.copy(deep=True)],  # deployed
+            [],  # hauled
         ]
 
         payloads = await processor.process()
@@ -667,17 +972,19 @@ class TestGear2GearProcessorPolygonFiltering:
         assert payloads[0]["devices"][0]["device_status"] == "hauled"
 
     @pytest.mark.asyncio
-    async def test_process_hauls_gear_moved_outside_polygon_by_mfr_id(
+    async def test_process_does_not_match_dest_gear_by_mfr_id(
         self, mock_source_client, mock_destination_client, test_polygon
     ):
-        """Test gear matched by mfr_device_id is hauled when moved outside polygon."""
+        """Set_ids are preserved end-to-end. A dest gear with a different
+        set_id from any source gear is unrelated, even if it shares an
+        mfr_device_id, and must not be hauled or updated.
+        """
         processor = Gear2GearProcessor(
             source_client=mock_source_client,
             destination_client=mock_destination_client,
             containing_shapes=[test_polygon],
         )
 
-        # Source gear is outside polygon
         source_gear = BuoyGear(
             id=uuid4(),
             display_id="GEAR-SOURCE",
@@ -688,7 +995,7 @@ class TestGear2GearProcessorPolygonFiltering:
                     device_id="dev-1",
                     mfr_device_id="shared-mfr-id",
                     label="Device 1",
-                    location=DeviceLocation(latitude=50.0, longitude=-130.0),  # Outside
+                    location=DeviceLocation(latitude=50.0, longitude=-130.0),
                     last_updated=datetime(2024, 1, 15, 10, 0, 0, tzinfo=timezone.utc),
                     last_deployed=datetime(2024, 1, 10, 8, 0, 0, tzinfo=timezone.utc),
                 )
@@ -697,20 +1004,17 @@ class TestGear2GearProcessorPolygonFiltering:
             manufacturer="TestManufacturer",
         )
 
-        # Destination gear has different ID but same mfr_device_id
         dest_gear = BuoyGear(
-            id=uuid4(),  # Different ID
+            id=uuid4(),
             display_id="GEAR-DEST",
             status="deployed",
             last_updated=datetime(2024, 1, 14, 10, 0, 0, tzinfo=timezone.utc),
             devices=[
                 BuoyDevice(
                     device_id="dev-dest",
-                    mfr_device_id="shared-mfr-id",  # Same mfr_device_id
+                    mfr_device_id="shared-mfr-id",
                     label="Device Dest",
-                    location=DeviceLocation(
-                        latitude=45.0, longitude=-120.0
-                    ),  # Was inside
+                    location=DeviceLocation(latitude=45.0, longitude=-120.0),
                     last_updated=datetime(2024, 1, 14, 10, 0, 0, tzinfo=timezone.utc),
                     last_deployed=datetime(2024, 1, 10, 8, 0, 0, tzinfo=timezone.utc),
                 )
@@ -719,15 +1023,12 @@ class TestGear2GearProcessorPolygonFiltering:
             manufacturer="TestManufacturer",
         )
 
-        mock_source_client.get_gears.return_value = [source_gear]
-        mock_destination_client.get_gears.return_value = [dest_gear]
+        mock_source_client.get_gears.side_effect = [[source_gear], []]
+        mock_destination_client.get_gears.side_effect = [[dest_gear], []]
 
         payloads = await processor.process()
 
-        # Should create haul payload targeting the destination gear's ID
-        assert len(payloads) == 1
-        assert payloads[0]["set_id"] == str(dest_gear.id)
-        assert payloads[0]["devices"][0]["device_status"] == "hauled"
+        assert payloads == []
 
     @pytest.mark.asyncio
     async def test_process_does_not_haul_unrelated_dest_gear(
@@ -764,8 +1065,14 @@ class TestGear2GearProcessorPolygonFiltering:
             manufacturer="OtherManufacturer",
         )
 
-        mock_source_client.get_gears.return_value = [gear_inside_polygon]
-        mock_destination_client.get_gears.return_value = [unrelated_dest_gear]
+        mock_source_client.get_gears.side_effect = [
+            [gear_inside_polygon],
+            [],
+        ]  # deployed, hauled
+        mock_destination_client.get_gears.side_effect = [
+            [unrelated_dest_gear],
+            [],
+        ]  # deployed, hauled
 
         payloads = await processor.process()
 
@@ -825,8 +1132,14 @@ class TestGear2GearProcessorPolygonFiltering:
             manufacturer="TestManufacturer",
         )
 
-        mock_source_client.get_gears.return_value = [source_gear]
-        mock_destination_client.get_gears.return_value = [dest_gear]
+        mock_source_client.get_gears.side_effect = [
+            [source_gear],
+            [],
+        ]  # deployed, hauled
+        mock_destination_client.get_gears.side_effect = [
+            [dest_gear],
+            [],
+        ]  # deployed, hauled
 
         payloads = await processor.process()
 

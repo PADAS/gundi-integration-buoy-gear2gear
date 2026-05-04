@@ -52,12 +52,17 @@ class Gear2GearAuthConfiguration(AuthActionConfiguration, ExecutableActionMixin)
 class Gear2GearPullConfiguration(PullActionConfiguration):
     """Configuration for the gear2gear pull action."""
 
-    sync_interval_minutes: int = pydantic.Field(
-        default=5,
-        title="Sync Interval (minutes)",
-        description="Desired sync frequency. Currently the action runs on a fixed 5-minute schedule; this value is for display and future configurable scheduling.",
+    lookback_minutes: int = pydantic.Field(
+        default=60,
+        title="Lookback Window (minutes)",
+        description=(
+            "Only fetch gears updated in the last N minutes from the "
+            "source. The action runs on a fixed 3-minute cron schedule, "
+            "so this should exceed 3 minutes to provide a safety margin "
+            "for missed or delayed runs."
+        ),
         ge=1,
-        le=60,
+        le=43200,
     )
     feature_groups: Optional[List[FeatureGroup]] = pydantic.Field(
         default=None,

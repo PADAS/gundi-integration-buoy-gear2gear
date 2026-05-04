@@ -61,7 +61,7 @@ class BuoyClient:
         params = dict(params) if params else {}
         params["include_empty_location"] = "true"
         if status:
-            params["status"] = status
+            params["state"] = status
 
         items = []
         session = await self._get_session()

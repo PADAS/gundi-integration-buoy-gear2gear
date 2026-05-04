@@ -1,6 +1,6 @@
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from shapely.geometry import MultiPolygon, Point, Polygon, shape
@@ -12,6 +12,8 @@ logger = logging.getLogger(__name__)
 
 # Type alias for polygon shapes
 PolygonShape = Union[Polygon, MultiPolygon]
+
+GEAR_API_PAGE_SIZE = 500
 
 
 class Gear2GearProcessor:
@@ -31,6 +33,7 @@ class Gear2GearProcessor:
         source_client: BuoyClient,
         destination_client: BuoyClient,
         containing_shapes: Optional[List[PolygonShape]] = None,
+        lookback_minutes: Optional[int] = None,
     ):
         """
         Initialize a Gear2GearProcessor instance.
@@ -41,10 +44,13 @@ class Gear2GearProcessor:
             containing_shapes: Optional list of shapely Polygon/MultiPolygon objects.
                 If provided, only gears with at least one device inside these
                 polygons will be synced.
+            lookback_minutes: If set, only fetch source gears updated
+                within this many minutes. If None, fetch all gears.
         """
         self._source_client = source_client
         self._destination_client = destination_client
         self._containing_shapes = containing_shapes or []
+        self._lookback_minutes = lookback_minutes
 
     def _gear_is_inside_polygons(self, gear: BuoyGear) -> bool:
         """
@@ -114,6 +120,72 @@ class Gear2GearProcessor:
         """Remove milliseconds from a datetime object."""
         return dt.replace(microsecond=0)
 
+    def _safe_recorded_at(self, source_gear: BuoyGear, dest_gear: BuoyGear) -> datetime:
+        """
+        Pick a recorded_at that won't invert ER's assigned_range.
+
+        ER stores each device's deployment as a tstzrange whose lower bound is
+        the device's last_deployed. An incoming observation closes the range at
+        recorded_at, so recorded_at must be strictly greater than every
+        last_deployed we know about for this gear — on either side of the sync.
+        Otherwise Postgres raises "range lower bound must be less than or equal
+        to range upper bound" and the request 500s.
+        """
+        deploys = [
+            d.last_deployed or d.last_updated
+            for d in list(source_gear.devices) + list(dest_gear.devices)
+        ]
+        deploys = [d for d in deploys if d is not None]
+        latest_deploy = max(deploys) if deploys else None
+
+        recorded_at = source_gear.last_updated
+        if latest_deploy and recorded_at <= latest_deploy:
+            recorded_at = latest_deploy + timedelta(seconds=1)
+        return recorded_at
+
+    @staticmethod
+    def _deduplicate_gears(
+        gears: List[BuoyGear],
+    ) -> List[BuoyGear]:
+        """
+        Remove duplicate gears, keeping the last value per ID.
+
+        Duplicates can occur if a gear appears in both the
+        deployed and hauled API responses during a status
+        transition. The last value for a given gear ID
+        overwrites earlier ones, which preserves the hauled
+        copy when deployed + hauled are concatenated in that
+        order. The list order reflects the first time each
+        gear ID was seen.
+
+        Args:
+            gears: List of gears, possibly with duplicates.
+
+        Returns:
+            Deduplicated list ordered by first occurrence of
+            each gear ID, with last value retained.
+        """
+        seen: Dict[str, BuoyGear] = {}
+        duplicate_count = 0
+        for gear in gears:
+            gear_id = str(gear.id)
+            if gear_id in seen:
+                duplicate_count += 1
+                logger.debug(
+                    "Duplicate gear %s (%s): " "keeping status=%s over %s",
+                    gear.display_id,
+                    gear_id,
+                    gear.status,
+                    seen[gear_id].status,
+                )
+            seen[gear_id] = gear
+        if duplicate_count:
+            logger.info(
+                "Deduplicated %d gear(s) that appeared " "in multiple status responses",
+                duplicate_count,
+            )
+        return list(seen.values())
+
     def _create_deploy_payload(self, source_gear: BuoyGear) -> Dict[str, Any]:
         """
         Create a deployment payload from a source gear.
@@ -178,6 +250,13 @@ class Gear2GearProcessor:
         """
         Create an update payload for an existing gear.
 
+        Uses the gear-level last_updated as recorded_at so the
+        observation timestamp reflects the status/data change,
+        avoiding 409 conflicts when device-level timestamps
+        haven't changed since the previous sync. The timestamp
+        is clamped past the latest known deployment on either
+        side — see _safe_recorded_at.
+
         Args:
             source_gear: The gear from the source ER instance.
             dest_gear: The existing gear in the destination.
@@ -185,6 +264,7 @@ class Gear2GearProcessor:
         Returns:
             Dict in the format expected by /api/v1.0/gear/ POST endpoint.
         """
+        recorded_at = self._safe_recorded_at(source_gear, dest_gear)
         devices = []
 
         for device in source_gear.devices:
@@ -199,9 +279,7 @@ class Gear2GearProcessor:
                 "last_updated": self._remove_milliseconds(
                     device.last_updated
                 ).isoformat(),
-                "recorded_at": self._remove_milliseconds(
-                    device.last_updated
-                ).isoformat(),
+                "recorded_at": self._remove_milliseconds(recorded_at).isoformat(),
                 "device_status": source_gear.status,
                 "location": {
                     "latitude": device.location.latitude,
@@ -225,6 +303,13 @@ class Gear2GearProcessor:
         """
         Create a haul payload from a source gear that is hauled.
 
+        Uses the gear-level last_updated as recorded_at so the
+        observation timestamp reflects the haul event, avoiding
+        409 conflicts when device-level timestamps haven't
+        changed since the previous sync. The timestamp is
+        clamped past the latest known deployment on either side
+        — see _safe_recorded_at.
+
         Args:
             source_gear: The hauled gear from the source ER instance.
             dest_gear: The existing gear in the destination.
@@ -232,6 +317,7 @@ class Gear2GearProcessor:
         Returns:
             Dict in the format expected by /api/v1.0/gear/ POST endpoint.
         """
+        recorded_at = self._safe_recorded_at(source_gear, dest_gear)
         devices = []
 
         for device in source_gear.devices:
@@ -246,9 +332,7 @@ class Gear2GearProcessor:
                 "last_updated": self._remove_milliseconds(
                     device.last_updated
                 ).isoformat(),
-                "recorded_at": self._remove_milliseconds(
-                    device.last_updated
-                ).isoformat(),
+                "recorded_at": self._remove_milliseconds(recorded_at).isoformat(),
                 "device_status": "hauled",
                 "location": {
                     "latitude": device.location.latitude,
@@ -309,28 +393,24 @@ class Gear2GearProcessor:
         Returns:
             True if the destination gear needs updating.
         """
-        # Check if status changed
+        # A status change always needs to be synced, even backwards in time.
         if source_gear.status != dest_gear.status:
             return True
 
-        # Check if source has newer data
-        if source_gear.last_updated > dest_gear.last_updated:
-            return True
+        # Hauled is terminal on the destination side: Buoy ER rejects
+        # re-haul with 400 "Device X is already hauled". Once both sides
+        # agree the gear is hauled, there's nothing left to push.
+        if source_gear.status == "hauled":
+            return False
 
-        # Check if any device locations changed
-        source_locations = {
-            d.mfr_device_id: (d.location.latitude, d.location.longitude)
-            for d in source_gear.devices
-        }
-        dest_locations = {
-            d.mfr_device_id: (d.location.latitude, d.location.longitude)
-            for d in dest_gear.devices
-        }
-
-        if source_locations != dest_locations:
-            return True
-
-        return False
+        # Otherwise only push an update when the source has strictly newer
+        # data. If the destination is newer (or equal), the source has
+        # nothing to contribute and we'd risk overwriting fresher dest
+        # state — or, when the dest has since been re-deployed with a
+        # last_deployed past source.last_updated, triggering a 500 from
+        # ER's assigned_range constructor ("range lower bound must be
+        # less than or equal to range upper bound").
+        return source_gear.last_updated > dest_gear.last_updated
 
     def _identify_sync_actions(
         self,
@@ -359,32 +439,22 @@ class Gear2GearProcessor:
         to_update: List[Tuple[BuoyGear, BuoyGear]] = []
         to_haul: List[Tuple[BuoyGear, BuoyGear]] = []
 
-        # Build lookup by gear ID
+        # IDs are preserved end-to-end: a gear's set_id and each device_id are
+        # written through from source to destination on deploy and reused on
+        # update/haul. Match strictly by set_id — falling back to
+        # mfr_device_id lets a new source gear hijack an unrelated dest gear
+        # that happens to share a physical device (e.g. a hauled gear that's
+        # been redeployed in source under a new set_id).
         dest_gear_by_id: Dict[str, BuoyGear] = {
             str(gear.id): gear for gear in dest_gears
         }
-
-        # Also build lookup by mfr_device_id for matching
-        dest_gear_by_mfr_id: Dict[str, BuoyGear] = {}
-        for gear in dest_gears:
-            for device in gear.devices:
-                dest_gear_by_mfr_id[device.mfr_device_id] = gear
 
         # Track which destination gears we've processed
         processed_dest_gear_ids: Set[str] = set()
 
         for source_gear in source_gears:
             source_id = str(source_gear.id)
-
-            # Try to find matching destination gear by ID first
             dest_gear = dest_gear_by_id.get(source_id)
-
-            # If not found by ID, try by mfr_device_id
-            if dest_gear is None:
-                for device in source_gear.devices:
-                    dest_gear = dest_gear_by_mfr_id.get(device.mfr_device_id)
-                    if dest_gear:
-                        break
 
             if dest_gear is None:
                 # Gear doesn't exist in destination
@@ -425,14 +495,9 @@ class Gear2GearProcessor:
         # Check for destination gears that moved outside the polygon
         # Only do this if we have polygon filtering (all_source_gears provided)
         if all_source_gears is not None:
-            # Build lookup for all source gears (unfiltered)
             all_source_by_id: Dict[str, BuoyGear] = {
                 str(gear.id): gear for gear in all_source_gears
             }
-            all_source_by_mfr_id: Dict[str, BuoyGear] = {}
-            for gear in all_source_gears:
-                for device in gear.devices:
-                    all_source_by_mfr_id[device.mfr_device_id] = gear
 
             for dest_gear in dest_gears:
                 dest_id = str(dest_gear.id)
@@ -443,14 +508,7 @@ class Gear2GearProcessor:
                 if dest_gear.status != "deployed":
                     continue
 
-                # Check if this destination gear matches any source gear
                 matching_source = all_source_by_id.get(dest_id)
-                if matching_source is None:
-                    for device in dest_gear.devices:
-                        matching_source = all_source_by_mfr_id.get(device.mfr_device_id)
-                        if matching_source:
-                            break
-
                 if matching_source is not None:
                     # This gear exists in source but wasn't in filtered list
                     # It means the gear moved outside the polygon - haul it
@@ -481,22 +539,54 @@ class Gear2GearProcessor:
         Returns:
             List of gear payloads ready to be sent to the destination Buoy API.
         """
+        # Build source query params with optional lookback window
+        source_params: Dict[str, Any] = {"page_size": GEAR_API_PAGE_SIZE}
+        if self._lookback_minutes:
+            updated_since = datetime.now(timezone.utc) - timedelta(
+                minutes=self._lookback_minutes
+            )
+            source_params["updated_since"] = updated_since.isoformat()
+            logger.info(
+                "Using lookback window: %d min " "(updated_since=%s)",
+                self._lookback_minutes,
+                source_params["updated_since"],
+            )
+
         logger.info("Fetching gears from source ER instance...")
-        all_source_gears = await self._source_client.get_gears(
-            params={"page_size": 10000}
+        deployed_source_gears = await self._source_client.get_gears(
+            params=dict(source_params), status="deployed"
         )
-        logger.info(f"Found {len(all_source_gears)} gears in source")
+        hauled_source_gears = await self._source_client.get_gears(
+            params=dict(source_params), status="hauled"
+        )
+        all_source_gears = self._deduplicate_gears(
+            deployed_source_gears + hauled_source_gears
+        )
+        logger.info(
+            f"Found {len(all_source_gears)} gears in source "
+            f"({len(deployed_source_gears)} deployed, "
+            f"{len(hauled_source_gears)} hauled)"
+        )
 
         # Apply polygon filter if configured
         filtered_source_gears = all_source_gears
         if self._containing_shapes:
             filtered_source_gears = self._filter_gears_by_polygon(all_source_gears)
 
+        # Destination always fetches all gears for full comparison
         logger.info("Fetching gears from destination ER instance...")
-        dest_gears = await self._destination_client.get_gears(
-            params={"page_size": 10000}
+        deployed_dest_gears = await self._destination_client.get_gears(
+            params={"page_size": GEAR_API_PAGE_SIZE}, status="deployed"
         )
-        logger.info(f"Found {len(dest_gears)} gears in destination")
+        hauled_dest_gears = await self._destination_client.get_gears(
+            params={"page_size": GEAR_API_PAGE_SIZE}, status="hauled"
+        )
+        dest_gears = self._deduplicate_gears(deployed_dest_gears + hauled_dest_gears)
+        logger.info(
+            f"Found {len(dest_gears)} gears in destination "
+            f"({len(deployed_dest_gears)} deployed, "
+            f"{len(hauled_dest_gears)} hauled)"
+        )
 
         # Pass both filtered and unfiltered source gears to detect gears that moved outside polygon
         to_deploy, to_update, to_haul = self._identify_sync_actions(

@@ -72,8 +72,8 @@ async def action_auth(
 
 @activity_logger()
 @crontab_schedule(
-    "*/5 * * * *"
-)  # Fixed every 5 min; sync_interval_minutes in config is for display/future use
+    "*/3 * * * *"
+)  # Fixed every 3 min; lookback window is configurable via action_config.lookback_minutes
 async def action_pull_gear(
     integration: Integration, action_config: Gear2GearPullConfiguration
 ) -> Dict:
@@ -146,6 +146,7 @@ async def _pull_gear(
         source_client=source_client,
         destination_client=destination_client,
         containing_shapes=containing_shapes,
+        lookback_minutes=action_config.lookback_minutes,
     )
     gear_payloads = await processor.process()
 

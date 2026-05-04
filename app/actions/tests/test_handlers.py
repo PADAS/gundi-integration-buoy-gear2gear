@@ -287,25 +287,25 @@ class TestConfigurationModels:
         """Test pull configuration defaults."""
         config = Gear2GearPullConfiguration()
 
-        assert config.sync_interval_minutes == 5
+        assert config.lookback_minutes == 60
 
     def test_pull_config_custom_interval(self):
-        """Test pull configuration with custom interval."""
-        config = Gear2GearPullConfiguration(sync_interval_minutes=10)
+        """Test pull configuration with custom lookback."""
+        config = Gear2GearPullConfiguration(lookback_minutes=120)
 
-        assert config.sync_interval_minutes == 10
+        assert config.lookback_minutes == 120
 
     def test_pull_config_validation(self):
         """Test pull configuration validation."""
         from pydantic import ValidationError
 
-        # Interval too low
+        # Lookback too low
         with pytest.raises(ValidationError):
-            Gear2GearPullConfiguration(sync_interval_minutes=0)
+            Gear2GearPullConfiguration(lookback_minutes=0)
 
-        # Interval too high
+        # Lookback too high
         with pytest.raises(ValidationError):
-            Gear2GearPullConfiguration(sync_interval_minutes=100)
+            Gear2GearPullConfiguration(lookback_minutes=43201)
 
     def test_pull_config_with_feature_groups(self):
         """Test pull configuration with feature groups."""
