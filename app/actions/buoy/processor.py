@@ -535,7 +535,7 @@ class Gear2GearProcessor:
 
         return to_deploy, to_update, to_haul
 
-    async def process(self) -> List[Dict[str, Any]]:
+    async def process(self) -> ProcessResult:
         """
         Process gear sync from source to destination.
 
@@ -547,7 +547,7 @@ class Gear2GearProcessor:
             5. Creates payloads for each action.
 
         Returns:
-            List of gear payloads ready to be sent to the destination Buoy API.
+            ProcessResult with gear payloads and sync counts.
         """
         # Build source query params with optional lookback window
         source_params: Dict[str, Any] = {"page_size": GEAR_API_PAGE_SIZE}

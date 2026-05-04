@@ -17,7 +17,7 @@ class TestActionAuth:
 
     @pytest.mark.asyncio
     async def test_auth_success(self, integration_v2_gear2gear, gear2gear_auth_config):
-        """Test successful authentication to both source and destination."""
+        """Test successful authentication to source."""
         with patch("app.actions.handlers.BuoyClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_client.get_gears.return_value = []
@@ -31,10 +31,7 @@ class TestActionAuth:
 
             assert result["valid_credentials"] is True
             assert result["source_valid"] is True
-            assert result["destination_valid"] is True
-
-            # Should have created two clients (source and destination)
-            assert mock_client_class.call_count == 2
+            assert mock_client_class.call_count == 1
 
     @pytest.mark.asyncio
     async def test_auth_source_failure(
@@ -45,12 +42,7 @@ class TestActionAuth:
             mock_source = AsyncMock()
             mock_source.get_gears.side_effect = Exception("Source connection failed")
             mock_source.__aenter__.return_value = mock_source
-
-            mock_dest = AsyncMock()
-            mock_dest.get_gears.return_value = []
-            mock_dest.__aenter__.return_value = mock_dest
-
-            mock_client_class.side_effect = [mock_source, mock_dest]
+            mock_client_class.return_value = mock_source
 
             result = await action_auth(
                 integration=integration_v2_gear2gear,
@@ -59,54 +51,7 @@ class TestActionAuth:
 
             assert result["valid_credentials"] is False
             assert result["source_valid"] is False
-            assert result["destination_valid"] is True
             assert "Source connection failed" in result["source_error"]
-
-    @pytest.mark.asyncio
-    async def test_auth_destination_failure(
-        self, integration_v2_gear2gear, gear2gear_auth_config
-    ):
-        """Test authentication failure on destination."""
-        with patch("app.actions.handlers.BuoyClient") as mock_client_class:
-            mock_source = AsyncMock()
-            mock_source.get_gears.return_value = []
-            mock_source.__aenter__.return_value = mock_source
-
-            mock_dest = AsyncMock()
-            mock_dest.get_gears.side_effect = Exception("Destination connection failed")
-            mock_dest.__aenter__.return_value = mock_dest
-
-            mock_client_class.side_effect = [mock_source, mock_dest]
-
-            result = await action_auth(
-                integration=integration_v2_gear2gear,
-                action_config=gear2gear_auth_config,
-            )
-
-            assert result["valid_credentials"] is False
-            assert result["source_valid"] is True
-            assert result["destination_valid"] is False
-            assert "Destination connection failed" in result["destination_error"]
-
-    @pytest.mark.asyncio
-    async def test_auth_both_failure(
-        self, integration_v2_gear2gear, gear2gear_auth_config
-    ):
-        """Test authentication failure on both endpoints."""
-        with patch("app.actions.handlers.BuoyClient") as mock_client_class:
-            mock_client = AsyncMock()
-            mock_client.get_gears.side_effect = Exception("Connection failed")
-            mock_client.__aenter__.return_value = mock_client
-            mock_client_class.return_value = mock_client
-
-            result = await action_auth(
-                integration=integration_v2_gear2gear,
-                action_config=gear2gear_auth_config,
-            )
-
-            assert result["valid_credentials"] is False
-            assert result["source_valid"] is False
-            assert result["destination_valid"] is False
 
 
 class TestActionPullGear:

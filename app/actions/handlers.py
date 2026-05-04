@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from typing import Dict
@@ -185,7 +186,7 @@ async def _pull_gear(
                 "to_haul": process_result.haul_count,
             },
         )
-    except aiohttp.ClientError as e:
+    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
         logger.warning(f"[{integration_id}] Failed to publish discovery activity log: {e}")
 
     # Send gear payloads to destination
@@ -271,7 +272,7 @@ async def _pull_gear(
                 "failures": failure_count,
             },
         )
-    except aiohttp.ClientError as e:
+    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
         logger.warning(f"[{integration_id}] Failed to publish sync activity log: {e}")
 
     return {
