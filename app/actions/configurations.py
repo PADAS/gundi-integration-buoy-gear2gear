@@ -22,7 +22,8 @@ class FeatureGroup(pydantic.BaseModel):
 class Gear2GearAuthConfiguration(AuthActionConfiguration, ExecutableActionMixin):
     """Authentication configuration for gear2gear sync.
 
-    Contains credentials for both source and destination ER instances.
+    Contains credentials for the source ER instance. Destination credentials
+    are retrieved from the Gundi connection's destination integration.
     """
 
     source_token: pydantic.SecretStr = pydantic.Field(
@@ -35,17 +36,6 @@ class Gear2GearAuthConfiguration(AuthActionConfiguration, ExecutableActionMixin)
         ...,
         title="Source ER URL",
         description="Base URL for the source EarthRanger instance (e.g., https://source.pamdas.org/).",
-    )
-    destination_token: pydantic.SecretStr = pydantic.Field(
-        ...,
-        title="Destination ER API Token",
-        description="API token for the destination EarthRanger instance.",
-        format="password",
-    )
-    destination_url: pydantic.AnyHttpUrl = pydantic.Field(
-        ...,
-        title="Destination ER URL",
-        description="Base URL for the destination EarthRanger instance (e.g., https://dest.pamdas.org/).",
     )
 
 
