@@ -26,6 +26,16 @@ class ProcessResult(NamedTuple):
     haul_count: int
 
 
+class ProcessResult(NamedTuple):
+    payloads: List[Dict[str, Any]]
+    source_count: int
+    filtered_count: int
+    dest_count: int
+    deploy_count: int
+    update_count: int
+    haul_count: int
+
+
 class Gear2GearProcessor:
     """
     Processor for syncing gear data between two EarthRanger instances.
