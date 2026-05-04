@@ -394,7 +394,8 @@ class TestGear2GearProcessorProcess:
         mock_source_client.get_gears.side_effect = [[], []]  # deployed, hauled
         mock_destination_client.get_gears.side_effect = [[], []]  # deployed, hauled
 
-        payloads = await processor.process()
+        result = await processor.process()
+        payloads = result.payloads
 
         assert payloads == []
         assert mock_source_client.get_gears.call_count == 2
@@ -415,7 +416,8 @@ class TestGear2GearProcessorProcess:
         ]  # deployed, hauled
         mock_destination_client.get_gears.side_effect = [[], []]  # deployed, hauled
 
-        payloads = await processor.process()
+        result = await processor.process()
+        payloads = result.payloads
 
         assert len(payloads) == 1
         assert payloads[0]["set_id"] == str(deployed_gear_source.id)
@@ -445,7 +447,8 @@ class TestGear2GearProcessorProcess:
             [],
         ]  # deployed, hauled
 
-        payloads = await processor.process()
+        result = await processor.process()
+        payloads = result.payloads
 
         assert len(payloads) == 1
         assert payloads[0]["devices"][0]["device_status"] == "hauled"
@@ -483,7 +486,8 @@ class TestGear2GearProcessorProcess:
             [],
         ]  # deployed, hauled
 
-        payloads = await processor.process()
+        result = await processor.process()
+        payloads = result.payloads
 
         assert len(payloads) == 2
 
@@ -524,7 +528,8 @@ class TestGear2GearProcessorProcess:
             [],  # hauled
         ]
 
-        payloads = await processor.process()
+        result = await processor.process()
+        payloads = result.payloads
 
         assert len(payloads) == 2
         set_ids = [p["set_id"] for p in payloads]
@@ -674,7 +679,8 @@ class TestGear2GearProcessorHelpers:
             [],  # hauled
         ]
 
-        payloads = await processor.process()
+        result = await processor.process()
+        payloads = result.payloads
 
         # Should produce exactly one haul payload, not two actions
         assert len(payloads) == 1
@@ -932,7 +938,8 @@ class TestGear2GearProcessorPolygonFiltering:
         ]
         mock_destination_client.get_gears.side_effect = [[], []]  # deployed, hauled
 
-        payloads = await processor.process()
+        result = await processor.process()
+        payloads = result.payloads
 
         # Only gear inside polygon should be processed
         assert len(payloads) == 1
@@ -964,7 +971,8 @@ class TestGear2GearProcessorPolygonFiltering:
             [],  # hauled
         ]
 
-        payloads = await processor.process()
+        result = await processor.process()
+        payloads = result.payloads
 
         # Should create haul payload for the gear that moved outside
         assert len(payloads) == 1
@@ -1026,7 +1034,8 @@ class TestGear2GearProcessorPolygonFiltering:
         mock_source_client.get_gears.side_effect = [[source_gear], []]
         mock_destination_client.get_gears.side_effect = [[dest_gear], []]
 
-        payloads = await processor.process()
+        result = await processor.process()
+        payloads = result.payloads
 
         assert payloads == []
 
@@ -1074,7 +1083,8 @@ class TestGear2GearProcessorPolygonFiltering:
             [],
         ]  # deployed, hauled
 
-        payloads = await processor.process()
+        result = await processor.process()
+        payloads = result.payloads
 
         # Should only deploy the gear inside polygon, not haul the unrelated one
         assert len(payloads) == 1
@@ -1141,7 +1151,8 @@ class TestGear2GearProcessorPolygonFiltering:
             [],
         ]  # deployed, hauled
 
-        payloads = await processor.process()
+        result = await processor.process()
+        payloads = result.payloads
 
         # Should only deploy source gear, dest gear is unrelated and not hauled
         assert len(payloads) == 1
