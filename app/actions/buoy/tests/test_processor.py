@@ -230,6 +230,39 @@ class TestGear2GearProcessorNeedsUpdate:
 
         assert processor.needs_update(source_gear, dest_gear) is False
 
+    def test_needs_update_device_count_differs_overrides_stale_timestamp(
+        self, processor, deployed_gear_source, trawl_gear_source
+    ):
+        """Device count mismatch triggers update even when source timestamp is older.
+
+        Regression: dest.last_updated ends up ~2 min ahead of source.last_updated
+        because the destination ER stamps its own server time on receipt. When the
+        second buoy checks in and upgrades the gear to a trawl, the gear-level
+        last_updated on source does not advance past the dest timestamp, so the
+        timestamp check alone would permanently skip the update.
+        """
+        source_gear = trawl_gear_source.copy(deep=True)
+        source_gear.last_updated = datetime(2024, 1, 15, 10, 8, 0, tzinfo=timezone.utc)
+
+        dest_gear = trawl_gear_source.copy(deep=True)
+        dest_gear.devices = dest_gear.devices[:1]  # only one device in destination
+        dest_gear.last_updated = datetime(2024, 1, 15, 10, 10, 0, tzinfo=timezone.utc)  # dest is newer
+
+        assert processor.needs_update(source_gear, dest_gear) is True
+
+    def test_needs_update_type_differs_overrides_stale_timestamp(
+        self, processor, deployed_gear_source, trawl_gear_source
+    ):
+        """Type mismatch (single→trawl) triggers update even when source timestamp is older."""
+        source_gear = trawl_gear_source.copy(deep=True)
+        source_gear.last_updated = datetime(2024, 1, 15, 10, 8, 0, tzinfo=timezone.utc)
+
+        dest_gear = trawl_gear_source.copy(deep=True)
+        dest_gear.type = "single"
+        dest_gear.last_updated = datetime(2024, 1, 15, 10, 10, 0, tzinfo=timezone.utc)  # dest is newer
+
+        assert processor.needs_update(source_gear, dest_gear) is True
+
 
 class TestGear2GearProcessorIdentifySyncActions:
     """Tests for the _identify_sync_actions method."""
