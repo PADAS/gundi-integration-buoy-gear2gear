@@ -403,6 +403,16 @@ class Gear2GearProcessor:
         if source_gear.status == "hauled":
             return False
 
+        # Structural changes must be synced regardless of timestamps.
+        # The destination ER stamps its own server time on receipt, so
+        # dest.last_updated can end up newer than source.last_updated even
+        # when the source later gains a new device or changes type (e.g.
+        # single → trawl when the second buoy checks in).
+        if len(source_gear.devices) != len(dest_gear.devices):
+            return True
+        if source_gear.type != dest_gear.type:
+            return True
+
         # Otherwise only push an update when the source has strictly newer
         # data. If the destination is newer (or equal), the source has
         # nothing to contribute and we'd risk overwriting fresher dest
